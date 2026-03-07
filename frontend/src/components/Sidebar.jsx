@@ -7,6 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { getMyOrganization, getUserFriends } from "../lib/api";
 import { useStreamContext } from "../context/StreamContext";
 import {
+  BellIcon,
+  BellOffIcon,
   FileTextIcon,
   HashIcon,
   LayoutDashboardIcon,
@@ -195,7 +197,7 @@ const Sidebar = () => {
   const [contactCardUser, setContactCardUser] = useState(null);
 
   /* Stream DM metadata */
-  const { dmMeta } = useStreamContext();
+  const { dmMeta, notifPermission, requestNotifPermission } = useStreamContext();
 
   /* Pinned DM user IDs — persisted in localStorage */
   const [pinnedIds, setPinnedIds] = useState(() => {
@@ -336,6 +338,32 @@ const Sidebar = () => {
                 <span className="min-w-[18px] h-[18px] bg-primary text-primary-content rounded-full text-[10px] font-bold flex items-center justify-center px-1 leading-none animate-pulse">
                   {totalUnread > 99 ? "99+" : totalUnread}
                 </span>
+              )}
+              {/* Browser notification toggle button */}
+              {notifPermission !== "unsupported" && (
+                notifPermission === "granted" ? (
+                  <span
+                    title="Browser notifications enabled"
+                    className="p-0.5 rounded text-success cursor-default"
+                  >
+                    <BellIcon className="size-3.5" />
+                  </span>
+                ) : notifPermission === "denied" ? (
+                  <span
+                    title="Notifications blocked — open browser settings to allow"
+                    className="p-0.5 rounded text-error cursor-default"
+                  >
+                    <BellOffIcon className="size-3.5" />
+                  </span>
+                ) : (
+                  <button
+                    onClick={requestNotifPermission}
+                    title="Enable browser notifications"
+                    className="p-0.5 rounded text-base-content/30 hover:text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    <BellIcon className="size-3.5" />
+                  </button>
+                )
               )}
               <Link
                 to="/friends"

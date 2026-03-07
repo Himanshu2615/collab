@@ -74,6 +74,7 @@ const FullScreenChatPage = () => {
     // Immediately show loader and clear stale channel whenever the target changes
     setLoading(true);
     setChannel(null);
+    setShowSearch(false);
 
     const initChat = async () => {
       if (!tokenData?.token || !authUser) return;
@@ -152,6 +153,10 @@ const FullScreenChatPage = () => {
         e.preventDefault();
         setShowSearch(true);
       }
+
+      if (e.key === "Escape") {
+        setShowSearch(false);
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
 
@@ -210,150 +215,143 @@ const FullScreenChatPage = () => {
           <div className="flex flex-col h-full w-full">
 
             {/* ════════════════════════════════
-                SLACK-STYLE HEADER
+                MODERN HEADER
             ════════════════════════════════ */}
-            <div
-              className="flex-shrink-0 flex items-center justify-between px-5"
-              style={{ height: 56, borderBottom: "1px solid #E8E8E8", background: "#FFFFFF" }}
-            >
+            <div className="flex-shrink-0 flex items-center justify-between px-6 py-3.5 bg-base-100/80 backdrop-blur-md border-b border-base-300 shadow-sm relative z-10">
               {/* Left: Channel name + subtitle */}
               <button
-                className="flex flex-col items-start hover:bg-gray-100 px-3 py-1.5 rounded-lg transition-colors min-w-0"
+                className="flex flex-col items-start hover:bg-base-200/50 px-3 py-1.5 rounded-xl transition-all min-w-0"
                 onClick={() => setShowInfo(true)}
               >
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                   {isChannel && (
-                    <HashIcon className="size-5 text-gray-700 flex-shrink-0" strokeWidth={2.5} />
+                    <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 text-primary">
+                      <HashIcon className="size-4 flex-shrink-0" strokeWidth={2.5} />
+                    </div>
                   )}
-                  <span className="font-bold text-[16px] text-gray-900 leading-tight truncate">
+                  <span className="font-bold text-lg text-base-content leading-tight truncate">
                     {displayName}
                   </span>
                 </div>
                 {isChannel && (
-                  <span className="text-[12px] text-gray-500 leading-tight">
+                  <span className="text-[13px] text-base-content/60 font-medium leading-tight mt-0.5">
                     {memberCount} members
                   </span>
                 )}
                 {!isChannel && dmPartner && (
-                  <span className="text-[12px] font-medium leading-tight" style={{ color: "#007A5A" }}>
-                    ● online
+                  <span className="text-[13px] font-medium leading-tight mt-0.5 flex items-center gap-1.5 text-success">
+                    <span className="w-1.5 h-1.5 bg-success rounded-full animate-pulse"></span>
+                    Online
                   </span>
                 )}
               </button>
 
               {/* Right: stacked avatars + action icons */}
-              <div className="flex items-center gap-1.5 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-shrink-0">
 
                 {/* Stacked member avatars (channel only) */}
                 {isChannel && headerMembers.length > 0 && (
                   <button
                     onClick={() => setShowMembers(true)}
-                    className="flex items-center hover:opacity-80 transition-opacity mr-1"
+                    className="flex items-center hover:opacity-80 transition-opacity mr-3 group"
                     title="View members"
                   >
-                    <div className="flex -space-x-2">
+                    <div className="flex -space-x-2.5 group-hover:-space-x-1.5 transition-all duration-300">
                       {headerMembers.map((m, i) => (
                         <Avatar
                           key={m.user_id || i}
                           src={getUserImage(m.user_id) || m.user?.image}
                           name={m.user?.name}
-                          size="w-7 h-7"
-                          className="border-2 border-white"
+                          size="w-8 h-8"
+                          className="border-2 border-base-100 shadow-sm"
                           style={{ zIndex: headerMembers.length - i }}
                         />
                       ))}
                     </div>
                     {extraCount > 0 && (
-                      <span className="text-[12px] font-semibold ml-1.5" style={{ color: "#1264A3" }}>
+                      <span className="text-[13px] font-bold ml-2 text-primary/80 bg-primary/10 px-2 py-0.5 rounded-full">
                         +{extraCount}
                       </span>
                     )}
                   </button>
                 )}
 
-                {/* Active call pill */}
-                {isCallActive ? (
-                  <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold bg-red-50 text-red-600 border border-red-200">
-                    <span className="tabular-nums">
-                      {Math.floor(callDuration / 60)}:{(callDuration % 60).toString().padStart(2, "0")}
-                    </span>
-                    <button onClick={() => { setIsCallActive(false); setCallDuration(0); }}>
-                      <XIcon className="size-4" />
+                {/* Action buttons */}
+                <div className="flex items-center gap-1 bg-base-200/50 p-1 rounded-xl">
+                  {isCallActive ? (
+                    <div className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold bg-error/10 text-error animate-pulse border border-error/20 shadow-sm">
+                      <span className="tabular-nums">
+                        {Math.floor(callDuration / 60)}:{(callDuration % 60).toString().padStart(2, "0")}
+                      </span>
+                      <button onClick={() => { setIsCallActive(false); setCallDuration(0); }} className="hover:bg-error/20 p-1 rounded-md transition-colors">
+                        <XIcon className="size-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      title="Start video call"
+                      onClick={() => {
+                        setCallId(`call-${channelOrUserId}-${Date.now()}`);
+                        setShowVideoCall(true);
+                        setIsCallActive(true);
+                      }}
+                      className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
+                    >
+                      <VideoIcon className="size-[18px]" />
                     </button>
-                  </div>
-                ) : (
+                  )}
+
                   <button
-                    title="Start video call"
-                    onClick={() => {
-                      setCallId(`call-${channelOrUserId}-${Date.now()}`);
-                      setShowVideoCall(true);
-                      setIsCallActive(true);
-                    }}
-                    className="w-8 h-8 rounded-md flex items-center justify-center transition-colors hover:bg-gray-100"
-                    style={{ color: "#616061" }}
+                    title="Search (Ctrl+F)"
+                    onClick={() => setShowSearch((v) => !v)}
+                    className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
                   >
-                    <VideoIcon className="size-[18px]" />
+                    <SearchIcon className="size-[18px]" />
                   </button>
-                )}
 
-                {/* Search */}
-                <button
-                  title="Search (Ctrl+F)"
-                  onClick={() => setShowSearch((v) => !v)}
-                  className="w-8 h-8 rounded-md flex items-center justify-center transition-colors hover:bg-gray-100"
-                  style={{ color: "#616061" }}
-                >
-                  <SearchIcon className="size-[18px]" />
-                </button>
+                  {isChannel && (
+                    <button
+                      title="Members"
+                      onClick={() => setShowMembers(true)}
+                      className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
+                    >
+                      <UsersIcon className="size-[18px]" />
+                    </button>
+                  )}
 
-                {/* Members (channel) */}
-                {isChannel && (
                   <button
-                    title="Members"
-                    onClick={() => setShowMembers(true)}
-                    className="w-8 h-8 rounded-md flex items-center justify-center transition-colors hover:bg-gray-100"
-                    style={{ color: "#616061" }}
+                    title="More options"
+                    onClick={() => setShowInfo(true)}
+                    className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
                   >
-                    <UsersIcon className="size-[18px]" />
+                    <MoreVerticalIcon className="size-[18px]" />
                   </button>
-                )}
-
-                {/* More */}
-                <button
-                  title="More options"
-                  onClick={() => setShowInfo(true)}
-                  className="w-8 h-8 rounded-md flex items-center justify-center transition-colors hover:bg-gray-100"
-                  style={{ color: "#616061" }}
-                >
-                  <MoreVerticalIcon className="size-[18px]" />
-                </button>
+                </div>
               </div>
             </div>
 
             {/* ════════════════════════════════
-                SEARCH BAR (below header)
+                SEARCH OVERLAY
             ════════════════════════════════ */}
             {showSearch && (
-              <div style={{ borderBottom: "1px solid #E8E8E8" }}>
-                <MessageSearch
-                  channel={channel}
-                  onClose={() => setShowSearch(false)}
-                  onMessageSelect={(msg) => {
-                    const el = document.querySelector(`[data-message-id="${msg.id}"]`);
-                    if (el) {
-                      el.scrollIntoView({ behavior: "smooth", block: "center" });
-                      el.classList.add("highlight-message");
-                      setTimeout(() => el.classList.remove("highlight-message"), 2000);
-                    }
-                  }}
-                />
-              </div>
+              <MessageSearch
+                channel={channel}
+                onClose={() => setShowSearch(false)}
+                onMessageSelect={(msg) => {
+                  const el = document.querySelector(`[data-message-id="${msg.id}"]`);
+                  if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el.classList.add("highlight-message");
+                    setTimeout(() => el.classList.remove("highlight-message"), 2000);
+                  }
+                }}
+              />
             )}
 
             {/* ════════════════════════════════
                 MESSAGES + INPUT
             ════════════════════════════════ */}
-            <div className="flex flex-1 min-h-0 overflow-hidden">
+            <div className="flex flex-1 min-h-0 overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-base-200/20">
               <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
                 <Window>
                   <MessageList

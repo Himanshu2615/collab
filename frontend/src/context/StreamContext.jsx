@@ -70,6 +70,27 @@ export const StreamProvider = ({ children }) => {
   const selfIdRef = useRef(null);
   useEffect(() => { selfIdRef.current = authUser?._id ?? null; }, [authUser]);
 
+  /* ── Browser notification permission ───────────── */
+  const [notifPermission, setNotifPermission] = useState(
+    () => ("Notification" in window ? Notification.permission : "unsupported")
+  );
+
+  const requestNotifPermission = useCallback(async () => {
+    if (!("Notification" in window)) return "unsupported";
+    if (Notification.permission === "granted") return "granted";
+    const result = await Notification.requestPermission();
+    setNotifPermission(result);
+    return result;
+  }, []);
+
+  /* Auto-request once when the user is logged in */
+  useEffect(() => {
+    if (!authUser) return;
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().then(setNotifPermission);
+    }
+  }, [authUser]);
+
   useEffect(() => {
     if (!tokenData?.token || !authUser) return;
     let isMounted = true;
@@ -145,10 +166,11 @@ export const StreamProvider = ({ children }) => {
           /* For incoming messages, the sender IS the partner (unless it's from self) */
           const partnerInfo = isFromSelf ? null : sender;
 
-          /* Toast only for incoming messages when not on that chat */
+          /* Toast + browser notification only for incoming messages when not on that chat */
           if (!isFromSelf && !isActiveChat) {
             const senderName = sender?.name || "Someone";
             const txt = msgPreview(message) || "New message";
+
             toast.custom(
               (t) => (
                 <MsgToast
@@ -161,6 +183,23 @@ export const StreamProvider = ({ children }) => {
               ),
               { duration: 4500, position: "bottom-right", id: `dm-${channelId}` }
             );
+
+            /* Browser notification — only when the tab is hidden/blurred */
+            if ("Notification" in window && Notification.permission === "granted" && document.visibilityState === "hidden") {
+              try {
+                const n = new Notification(senderName, {
+                  body: txt,
+                  icon: sender?.image || "/favicon.ico",
+                  tag:  `dm-${partnerId}`,   // collapses multiple messages from same person
+                  renotify: true,
+                });
+                n.onclick = () => {
+                  window.focus();
+                  window.location.href = `/chat/${partnerId}`;
+                  n.close();
+                };
+              } catch (_) { /* some browsers block even after permission */ }
+            }
           }
 
           // Fetch exact unread count from the active channel stream structure if available
@@ -287,12 +326,12 @@ export const StreamProvider = ({ children }) => {
   }, []);
 
   return (
-    <StreamContext.Provider value={{ dmMeta, markAsRead }}>
+    <StreamContext.Provider value={{ dmMeta, markAsRead, notifPermission, requestNotifPermission }}>
       {children}
     </StreamContext.Provider>
   );
 };
 
 export const useStreamContext = () =>
-  useContext(StreamContext) ?? { dmMeta: {}, markAsRead: () => {} };
+  useContext(StreamContext) ?? { dmMeta: {}, markAsRead: () => {}, notifPermission: "unsupported", requestNotifPermission: async () => {} };
 
