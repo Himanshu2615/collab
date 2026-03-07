@@ -163,19 +163,24 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       callRef.current = videoCall;
 
       if (isInitiator) {
+        // Create the call and ring all members.
+        // The `data.members` array includes both the caller and all callees.
         await videoCall.getOrCreate({
           ring: true,
-          video: callType === 'video',
           data: {
             members: Array.from(new Set(participantIds))
               .filter(Boolean)
               .map((id) => ({ user_id: id })),
-            video: callType === 'video',
           },
         });
+      } else {
+        // Callee: fetch the call state before joining so the SDK knows
+        // the call is in `ringing` state and can accept it properly.
+        await videoCall.get();
       }
 
-      await videoCall.join();
+      // join() internally accepts the ring for the callee.
+      await videoCall.join({ create: false });
 
       if (selectedMicId) {
         await videoCall.microphone.select(selectedMicId);

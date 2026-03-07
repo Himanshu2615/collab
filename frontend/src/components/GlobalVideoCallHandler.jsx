@@ -73,7 +73,8 @@ const GlobalVideoCallHandler = () => {
         callId,
         callerName: event.user?.name || 'Someone',
         callerImage: event.user?.image || '',
-        type: event.video ? 'video' : 'audio',
+        // `event.video` is the canonical field; fall back to call-level flag.
+        type: (event.video ?? event.call?.video ?? true) ? 'video' : 'audio',
         conversationId,
         callerUserId,
         participantIds: (event.members || []).map((m) => m.user_id).filter(Boolean),
@@ -168,7 +169,11 @@ const GlobalVideoCallHandler = () => {
       unsubscribeReject?.();
       unsubscribeAccept?.();
       unsubscribeEnd?.();
-      videoClientRef.current = null;
+      // Fully disconnect the video client so the next login starts fresh.
+      if (videoClientRef.current) {
+        videoClientRef.current.disconnectUser?.().catch(() => {});
+        videoClientRef.current = null;
+      }
     };
   }, [authUser, tokenData]);
 
