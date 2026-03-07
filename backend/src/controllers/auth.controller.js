@@ -1,6 +1,7 @@
 import { upsertStreamUser } from "../lib/stream.js";
 import User from "../models/User.js";
 import jwt from "jsonwebtoken";
+import cloudinary from "../lib/cloudinary.js";
 
 // 🧠 Helper function to create JWT
 function createToken(userId) {
@@ -29,25 +30,24 @@ export async function signup(req, res) {
       return res.status(400).json({ message: "Email already exists, please use a different one" });
     }
 
-    const idx = Math.floor(Math.random() * 100) + 1;
-    const randomAvatar = `https://avatar.iran.liara.run/public/${idx}.png`;
-
     const newUser = await User.create({
       email,
       fullName,
       password,
-      profilePic: randomAvatar,
+      profilePic: "", // intentionally empty — user sets a real photo during onboarding
     });
 
     try {
       await upsertStreamUser({
         id: newUser._id.toString(),
         name: newUser.fullName,
-        image: newUser.profilePic || "",
+        image: "",
       });
       console.log(`✅ Stream user created for ${newUser.fullName}`);
     } catch (error) {
-      console.log("⚠️ Error creating Stream user:", error);
+      console.log("⚠️ Error creating Stream user, rolling back MongoDB user:", error.message);
+      await User.findByIdAndDelete(newUser._id);
+      return res.status(500).json({ message: "Failed to create chat user. Please try again later." });
     }
 
     // ✅ FIXED: use process.env.JWT_SECRET instead of JWT_SECRET_KEY
@@ -75,14 +75,26 @@ export async function login(req, res) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).populate("organization");
     if (!user) return res.status(401).json({ message: "Invalid email or password" });
 
     const isPasswordCorrect = await user.matchPassword(password);
     if (!isPasswordCorrect) return res.status(401).json({ message: "Invalid email or password" });
 
-    
+
     const token = createToken(user._id);
+
+    // Keep Stream in sync on every login
+    try {
+      await upsertStreamUser({
+        id: user._id.toString(),
+        name: user.fullName,
+        image: user.profilePic || "",
+        ...(user.organization?.slug ? { teams: [user.organization.slug] } : {}),
+      });
+    } catch (streamError) {
+      console.log("⚠️ Stream sync failed during login (non-fatal):", streamError.message);
+    }
 
     res.cookie("jwt", token, {
       maxAge: 7 * 24 * 60 * 60 * 1000,
@@ -120,12 +132,26 @@ export async function onboard(req, res) {
         ].filter(Boolean),
       });
     }
+    let profilePicUrl = req.body.profilePic || "";
+
+    // Upload to Cloudinary if it's a new base64 image
+    if (req.body.profilePic?.startsWith("data:")) {
+      try {
+        const uploadResponse = await cloudinary.uploader.upload(req.body.profilePic, {
+          folder: "profile_pics",
+        });
+        profilePicUrl = uploadResponse.secure_url;
+      } catch (uploadError) {
+        console.error("Cloudinary upload error during onboarding:", uploadError);
+      }
+    }
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { ...req.body, isOnboarded: true },
-      { new: true }
-    );
+      { fullName, bio, nativeLanguage, learningLanguage, location, profilePic: profilePicUrl, isOnboarded: true },
+      { new: true, runValidators: true }
+    ).populate("organization");
+
 
     if (!updatedUser) return res.status(404).json({ message: "User not found" });
 
@@ -134,7 +160,9 @@ export async function onboard(req, res) {
         id: updatedUser._id.toString(),
         name: updatedUser.fullName,
         image: updatedUser.profilePic || "",
+        ...(updatedUser.organization?.slug ? { teams: [updatedUser.organization.slug] } : {}),
       });
+
       console.log(`✅ Stream user updated for ${updatedUser.fullName}`);
     } catch (streamError) {
       console.log("⚠️ Error updating Stream user during onboarding:", streamError.message);
@@ -146,3 +174,52 @@ export async function onboard(req, res) {
     res.status(500).json({ message: "Internal Server Error" });
   }
 }
+
+export async function updateProfile(req, res) {
+  try {
+    const userId = req.user._id;
+    const { fullName, bio, nativeLanguage, learningLanguage, location, profilePic } = req.body;
+
+    let profilePicUrl = profilePic;
+
+    if (profilePic?.startsWith("data:")) {
+      try {
+        const uploadResponse = await cloudinary.uploader.upload(profilePic, {
+          folder: "profile_pics",
+        });
+        profilePicUrl = uploadResponse.secure_url;
+      } catch (uploadError) {
+        console.error("Cloudinary upload error during profile update:", uploadError);
+      }
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { fullName, bio, nativeLanguage, learningLanguage, location, profilePic: profilePicUrl },
+      { new: true, runValidators: true }
+    ).select("-password").populate("organization");
+
+
+
+    if (!updatedUser) return res.status(404).json({ message: "User not found" });
+
+    // Keep Stream in sync
+    try {
+      await upsertStreamUser({
+        id: updatedUser._id.toString(),
+        name: updatedUser.fullName,
+        image: updatedUser.profilePic || "",
+        ...(updatedUser.organization?.slug ? { teams: [updatedUser.organization.slug] } : {}),
+      });
+
+    } catch (e) {
+      console.log("⚠️ Stream sync failed during profile update:", e.message);
+    }
+
+    res.status(200).json({ success: true, user: updatedUser });
+  } catch (error) {
+    console.error("updateProfile error:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+}
+

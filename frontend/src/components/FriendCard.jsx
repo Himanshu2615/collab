@@ -1,32 +1,54 @@
 import { Link } from "react-router";
 import { LANGUAGE_TO_FLAG } from "../constants";
+import { MessageSquareIcon, UserIcon } from "lucide-react";
+import Avatar from "./Avatar";
+
 
 const FriendCard = ({ friend }) => {
   return (
-    <div className="card bg-base-200 hover:shadow-md transition-shadow">
-      <div className="card-body p-4">
-        {/* USER INFO */}
-        <div className="flex items-center gap-3 mb-3">
-          <div className="avatar size-12">
-            <img src={friend.profilePic} alt={friend.fullName} />
-          </div>
-          <h3 className="font-semibold truncate">{friend.fullName}</h3>
+    <div className="card bg-base-100 border border-base-300 hover:border-primary/50 transition-all hover:shadow-lg group">
+      <div className="card-body p-5">
+        <div className="flex items-start justify-between">
+          <Avatar
+            src={friend.profilePic}
+            name={friend.fullName}
+            size="w-12 h-12"
+            rounded="rounded-xl"
+            className="ring ring-primary/10 ring-offset-base-100 ring-offset-2"
+          />
+
+          <div className="badge badge-success badge-xs">Online</div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          <span className="badge badge-secondary text-xs">
+        <div className="mt-4">
+          <h3 className="font-bold text-lg group-hover:text-primary transition-colors">{friend.fullName}</h3>
+          {(friend.location || friend.nativeLanguage) && (
+            <p className="text-xs text-base-content/50 mb-4 capitalize">
+              {friend.location || friend.nativeLanguage}
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-6">
+          <span className="bg-base-200 text-base-content px-2 py-1 rounded text-[10px] font-semibold flex items-center">
             {getLanguageFlag(friend.nativeLanguage)}
-            Native: {friend.nativeLanguage}
+            {friend.nativeLanguage}
           </span>
-          <span className="badge badge-outline text-xs">
+          <span className="bg-primary/10 text-primary px-2 py-1 rounded text-[10px] font-semibold flex items-center">
             {getLanguageFlag(friend.learningLanguage)}
-            Learning: {friend.learningLanguage}
+            {friend.learningLanguage}
           </span>
         </div>
 
-        <Link to={`/chat/${friend._id}`} className="btn btn-outline w-full">
-          Message
-        </Link>
+        <div className="flex gap-2">
+          <Link to={`/chat/${friend._id}`} className="btn btn-primary btn-sm flex-1 text-white">
+            <MessageSquareIcon className="size-3 mr-1" />
+            Chat
+          </Link>
+          <button className="btn btn-ghost btn-sm btn-square border-base-300">
+            <UserIcon className="size-4" />
+          </button>
+        </div>
       </div>
     </div>
   );

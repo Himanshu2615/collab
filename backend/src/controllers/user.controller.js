@@ -6,19 +6,28 @@ export async function getRecommendedUsers(req, res) {
     const currentUserId = req.user.id;
     const currentUser = req.user;
 
-    const recommendedUsers = await User.find({
+    // Build base filter — always exclude self and existing friends
+    const filter = {
       $and: [
-        { _id: { $ne: currentUserId } }, //exclude current user
-        { _id: { $nin: currentUser.friends } }, // exclude current user's friends
+        { _id: { $ne: currentUserId } },
+        { _id: { $nin: currentUser.friends } },
         { isOnboarded: true },
       ],
-    });
+    };
+
+    // If user belongs to an org, scope to that org only
+    if (currentUser.organization) {
+      filter.$and.push({ organization: currentUser.organization });
+    }
+
+    const recommendedUsers = await User.find(filter);
     res.status(200).json(recommendedUsers);
   } catch (error) {
     console.error("Error in getRecommendedUsers controller", error.message);
     res.status(500).json({ message: "Internal Server Error" });
   }
 }
+
 
 export async function getMyFriends(req, res) {
   try {
@@ -48,8 +57,16 @@ export async function sendFriendRequest(req, res) {
       return res.status(404).json({ message: "Recipient not found" });
     }
 
+    // Org isolation: prevent cross-org friend requests
+    const sender = await User.findById(myId).select("organization");
+    if (sender.organization && recipient.organization) {
+      if (sender.organization.toString() !== recipient.organization.toString()) {
+        return res.status(403).json({ message: "You can only connect with members of your organization" });
+      }
+    }
+
     // check if user is already friends
-    if (recipient.friends.includes(myId)) {
+    if (recipient.friends.some((f) => f.toString() === myId)) {
       return res.status(400).json({ message: "You are already friends with this user" });
     }
 
@@ -110,6 +127,29 @@ export async function acceptFriendRequest(req, res) {
     res.status(200).json({ message: "Friend request accepted" });
   } catch (error) {
     console.log("Error in acceptFriendRequest controller", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+}
+export async function declineFriendRequest(req, res) {
+  try {
+    const { id: requestId } = req.params;
+
+    const friendRequest = await FriendRequest.findById(requestId);
+
+    if (!friendRequest) {
+      return res.status(404).json({ message: "Friend request not found" });
+    }
+
+    // Verify the current user is the recipient
+    if (friendRequest.recipient.toString() !== req.user.id) {
+      return res.status(403).json({ message: "You are not authorized to decline this request" });
+    }
+
+    await FriendRequest.findByIdAndDelete(requestId);
+
+    res.status(200).json({ message: "Friend request declined" });
+  } catch (error) {
+    console.log("Error in declineFriendRequest controller", error.message);
     res.status(500).json({ message: "Internal Server Error" });
   }
 }

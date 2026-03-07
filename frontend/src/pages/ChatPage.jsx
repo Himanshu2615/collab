@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
@@ -27,6 +27,9 @@ const ChatPage = () => {
   const [chatClient, setChatClient] = useState(null);
   const [channel, setChannel] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Keep a stable ref to the client so the cleanup function can always
+  // reach it even though state updates are asynchronous.
+  const clientRef = useRef(null);
 
   const { authUser } = useAuthUser();
 
@@ -67,6 +70,7 @@ const ChatPage = () => {
 
         await currChannel.watch();
 
+        clientRef.current = client;
         setChatClient(client);
         setChannel(currChannel);
       } catch (error) {
@@ -78,6 +82,13 @@ const ChatPage = () => {
     };
 
     initChat();
+
+    return () => {
+      if (clientRef.current?.userID) {
+        clientRef.current.disconnectUser();
+        clientRef.current = null;
+      }
+    };
   }, [tokenData, authUser, targetUserId]);
 
   const handleVideoCall = () => {

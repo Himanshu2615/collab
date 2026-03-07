@@ -47,9 +47,24 @@ const userSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    organization: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null,
+    },
+    role: {
+      type: String,
+      enum: ["member", "admin", "owner"],
+      default: "member",
+    },
   },
   { timestamps: true }
 );
+
+// Compound indexes for fast org-scoped queries (low-latency)
+userSchema.index({ organization: 1, isOnboarded: 1 });
+userSchema.index({ organization: 1, _id: 1 });
+
 
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();

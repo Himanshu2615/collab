@@ -29,6 +29,70 @@ export const completeOnboarding = async (userData) => {
   return response.data;
 };
 
+export const updateProfile = async (data) => {
+  const res = await axiosInstance.put("/auth/profile", data);
+  return res.data;
+};
+
+/* ── FILE MANAGEMENT ── */
+export const getFiles = async () => {
+  const res = await axiosInstance.get("/files");
+  return res.data;
+};
+
+export const uploadFile = async (data) => {
+  const res = await axiosInstance.post("/files/upload", data);
+  return res.data;
+};
+
+export const deleteFile = async (id) => {
+  const res = await axiosInstance.delete(`/files/${id}`);
+  return res.data;
+};
+
+export const moveFile = async ({ fileId, folderId }) => {
+  const res = await axiosInstance.patch(`/files/${fileId}/move`, { folderId: folderId || null });
+  return res.data;
+};
+
+/* ── FOLDERS ── */
+export const getFolders = async () => {
+  const res = await axiosInstance.get("/folders");
+  return res.data;
+};
+
+export const createFolder = async (name) => {
+  const res = await axiosInstance.post("/folders", { name });
+  return res.data;
+};
+
+export const deleteFolder = async (id) => {
+  const res = await axiosInstance.delete(`/folders/${id}`);
+  return res.data;
+};
+
+/* ── MEETINGS / HUDDLES ── */
+export const getMeetings = async ({ from, to } = {}) => {
+  const params = {};
+  if (from) params.from = from;
+  if (to)   params.to   = to;
+  const res = await axiosInstance.get("/meetings", { params });
+  return res.data;
+};
+
+export const createMeeting = async (data) => {
+  const res = await axiosInstance.post("/meetings/create", data);
+  return res.data;
+};
+
+export const deleteMeeting = async (id) => {
+  const res = await axiosInstance.delete(`/meetings/${id}`);
+  return res.data;
+};
+
+
+
+
 export async function getUserFriends() {
   const response = await axiosInstance.get("/users/friends");
   return response.data;
@@ -59,7 +123,55 @@ export async function acceptFriendRequest(requestId) {
   return response.data;
 }
 
+export async function declineFriendRequest(requestId) {
+  const response = await axiosInstance.delete(`/users/friend-request/${requestId}/decline`);
+  return response.data;
+}
+
+
 export async function getStreamToken() {
   const response = await axiosInstance.get("/chat/token");
   return response.data;
 }
+
+/* ── Organization ─────────────────────────────────────────── */
+export async function getMyOrganization() {
+  const response = await axiosInstance.get("/organizations/me");
+  return response.data;
+}
+
+export async function ensureOrgChannel(channelId) {
+  const response = await axiosInstance.post("/chat/ensure-channel", { channelId });
+  return response.data;
+}
+
+export async function createOrganization(data) {
+  const response = await axiosInstance.post("/organizations/create", data);
+  return response.data;
+}
+
+export async function joinOrganization(data) {
+  const response = await axiosInstance.post("/organizations/join", data);
+  return response.data;
+}
+
+export async function regenerateInviteCode() {
+  const response = await axiosInstance.post("/organizations/regenerate-code");
+  return response.data;
+}
+
+export async function createOrgChannel(data) {
+  const response = await axiosInstance.post("/organizations/channels", data);
+  return response.data;
+}
+
+export async function deleteOrgChannel(channelId) {
+  const response = await axiosInstance.delete(`/organizations/channels/${channelId}`);
+  return response.data;
+}
+
+export async function getOrgMembers() {
+  const response = await axiosInstance.get("/organizations/members");
+  return response.data;
+}
+
