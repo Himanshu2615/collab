@@ -27,7 +27,14 @@ export async function createOrganization(req, res) {
         let exists = await Organization.findOne({ slug });
         if (exists) slug = `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`;
 
-        const inviteCode = Organization.generateInviteCode();
+        // Guarantee inviteCode uniqueness
+        let inviteCode;
+        let isUnique = false;
+        while (!isUnique) {
+            inviteCode = Organization.generateInviteCode();
+            const codeExists = await Organization.findOne({ inviteCode });
+            if (!codeExists) isUnique = true;
+        }
 
         const org = await Organization.create({
             name: name.trim(),

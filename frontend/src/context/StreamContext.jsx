@@ -53,6 +53,15 @@ const msgPreview = (message) => {
   return "";
 };
 
+const MUTED_CONVERSATIONS_KEY = "collab_muted_conversations";
+const NOTIFICATION_PREFS_KEY = "collab_notification_preferences";
+const DEFAULT_CONVERSATION_PREFS = {
+  messages: false,
+  calls: false,
+  ringtoneVolume: 0.6,
+  vibrate: true,
+};
+
 /* ════════════════════════════════════════════════ */
 export const StreamProvider = ({ children }) => {
   const { authUser } = useAuthUser();
@@ -74,6 +83,158 @@ export const StreamProvider = ({ children }) => {
   const [notifPermission, setNotifPermission] = useState(
     () => ("Notification" in window ? Notification.permission : "unsupported")
   );
+  const [notificationPrefs, setNotificationPrefs] = useState(() => {
+    try {
+      const savedPrefs = JSON.parse(localStorage.getItem(NOTIFICATION_PREFS_KEY) || "null");
+      if (savedPrefs && typeof savedPrefs === "object") return savedPrefs;
+
+      const legacyMutedIds = JSON.parse(localStorage.getItem(MUTED_CONVERSATIONS_KEY) || "[]");
+      return Array.isArray(legacyMutedIds)
+        ? Object.fromEntries(
+            legacyMutedIds.map((id) => [id, { messages: true, calls: true }])
+          )
+        : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const updateNotificationPrefs = useCallback((updater) => {
+    setNotificationPrefs((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const getConversationAliases = useCallback((conversationId) => {
+    if (!conversationId) return [];
+
+    const aliases = new Set();
+    const selfId = selfIdRef.current;
+    const partnerId = extractPartnerId(conversationId, selfId);
+
+    if (partnerId) {
+      aliases.add(partnerId);
+      const partnerChannelId = dmMeta?.[partnerId]?.channelId;
+      if (partnerChannelId) aliases.add(partnerChannelId);
+    }
+
+    const mappedChannelId = dmMeta?.[conversationId]?.channelId;
+    if (mappedChannelId) aliases.add(mappedChannelId);
+
+    aliases.delete(conversationId);
+    return [...aliases, conversationId];
+  }, [dmMeta]);
+
+  const isDefaultConversationPrefs = useCallback((prefs) => (
+    !prefs?.messages &&
+    !prefs?.calls &&
+    prefs?.ringtoneVolume === DEFAULT_CONVERSATION_PREFS.ringtoneVolume &&
+    prefs?.vibrate === DEFAULT_CONVERSATION_PREFS.vibrate
+  ), []);
+
+  const getConversationPrefs = useCallback(
+    (conversationId) => {
+      const aliases = getConversationAliases(conversationId);
+      return aliases.reduce(
+        (prefs, key) => ({
+          ...prefs,
+          ...(notificationPrefs?.[key] || {}),
+        }),
+        { ...DEFAULT_CONVERSATION_PREFS }
+      );
+    },
+    [getConversationAliases, notificationPrefs]
+  );
+
+  const isMessageMuted = useCallback(
+    (conversationId) => !!getConversationPrefs(conversationId)?.messages,
+    [getConversationPrefs]
+  );
+
+  const isCallMuted = useCallback(
+    (conversationId) => !!getConversationPrefs(conversationId)?.calls,
+    [getConversationPrefs]
+  );
+
+  const isConversationMuted = useCallback(
+    (conversationId) => isMessageMuted(conversationId) || isCallMuted(conversationId),
+    [isCallMuted, isMessageMuted]
+  );
+
+  const toggleNotificationMute = useCallback((conversationId, type = "messages") => {
+    if (!conversationId || !["messages", "calls"].includes(type)) return false;
+
+    let nextMuted = false;
+    updateNotificationPrefs((prev) => {
+      const aliases = getConversationAliases(conversationId);
+      const current = aliases.reduce(
+        (prefs, key) => ({
+          ...prefs,
+          ...(prev?.[key] || {}),
+        }),
+        { ...DEFAULT_CONVERSATION_PREFS }
+      );
+      nextMuted = !current[type];
+      const nextConversationPrefs = {
+        ...current,
+        [type]: nextMuted,
+      };
+      const next = {
+        ...prev,
+      };
+
+      aliases.forEach((key) => {
+        delete next[key];
+      });
+
+      if (!isDefaultConversationPrefs(nextConversationPrefs)) {
+        next[conversationId] = nextConversationPrefs;
+      }
+
+      return next;
+    });
+
+    return nextMuted;
+  }, [getConversationAliases, isDefaultConversationPrefs, updateNotificationPrefs]);
+
+  const toggleConversationMute = useCallback(
+    (conversationId) => toggleNotificationMute(conversationId, "messages"),
+    [toggleNotificationMute]
+  );
+
+  const updateConversationCallSetting = useCallback((conversationId, key, value) => {
+    if (!conversationId || !["ringtoneVolume", "vibrate"].includes(key)) return;
+
+    updateNotificationPrefs((prev) => {
+      const aliases = getConversationAliases(conversationId);
+      const current = aliases.reduce(
+        (prefs, alias) => ({
+          ...prefs,
+          ...(prev?.[alias] || {}),
+        }),
+        { ...DEFAULT_CONVERSATION_PREFS }
+      );
+      const nextConversationPrefs = {
+        ...current,
+        [key]: value,
+      };
+      const next = {
+        ...prev,
+      };
+
+      aliases.forEach((alias) => {
+        delete next[alias];
+      });
+
+      if (!isDefaultConversationPrefs(nextConversationPrefs)) {
+        next[conversationId] = nextConversationPrefs;
+      }
+
+      return next;
+    });
+  }, [getConversationAliases, isDefaultConversationPrefs, updateNotificationPrefs]);
 
   const requestNotifPermission = useCallback(async () => {
     if (!("Notification" in window)) return "unsupported";
@@ -167,7 +328,7 @@ export const StreamProvider = ({ children }) => {
           const partnerInfo = isFromSelf ? null : sender;
 
           /* Toast + browser notification only for incoming messages when not on that chat */
-          if (!isFromSelf && !isActiveChat) {
+          if (!isFromSelf && !isActiveChat && !isMessageMuted(channelId)) {
             const senderName = sender?.name || "Someone";
             const txt = msgPreview(message) || "New message";
 
@@ -318,20 +479,46 @@ export const StreamProvider = ({ children }) => {
     };
   }, [tokenData, authUser]);
 
-  const markAsRead = useCallback((partnerId) => {
+  const markAsRead = useCallback(async (partnerId) => {
     setDmMeta((prev) => ({
       ...prev,
       [partnerId]: { ...(prev[partnerId] || {}), unread: 0 },
     }));
+
+    // Also tell Stream to mark it as read for sync across devices
+    try {
+      const client = StreamChat.getInstance(STREAM_API_KEY);
+      const selfId = selfIdRef.current;
+      if (!selfId || !partnerId) return;
+
+      const channelId = [selfId, partnerId].sort().join("-");
+      const channel = client.channel("messaging", channelId);
+      await channel.markRead();
+    } catch (err) {
+      console.warn("[StreamContext] Failed to mark channel as read in SDK:", err);
+    }
   }, []);
 
   return (
-    <StreamContext.Provider value={{ dmMeta, markAsRead, notifPermission, requestNotifPermission }}>
+    <StreamContext.Provider value={{ dmMeta, markAsRead, notifPermission, requestNotifPermission, notificationPrefs, getConversationPrefs, isConversationMuted, isMessageMuted, isCallMuted, toggleConversationMute, toggleNotificationMute, updateConversationCallSetting }}>
       {children}
     </StreamContext.Provider>
   );
 };
 
 export const useStreamContext = () =>
-  useContext(StreamContext) ?? { dmMeta: {}, markAsRead: () => {}, notifPermission: "unsupported", requestNotifPermission: async () => {} };
+  useContext(StreamContext) ?? {
+    dmMeta: {},
+    markAsRead: () => {},
+    notifPermission: "unsupported",
+    requestNotifPermission: async () => {},
+    notificationPrefs: {},
+    getConversationPrefs: () => DEFAULT_CONVERSATION_PREFS,
+    isConversationMuted: () => false,
+    isMessageMuted: () => false,
+    isCallMuted: () => false,
+    toggleConversationMute: () => false,
+    toggleNotificationMute: () => false,
+    updateConversationCallSetting: () => {},
+  };
 

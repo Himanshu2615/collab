@@ -1,28 +1,64 @@
-import { PhoneIcon, VideoIcon, XIcon, UserIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { PhoneIcon, SmartphoneIcon, VideoIcon, Volume2Icon, XIcon, UserIcon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
-const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, callerImage, callType = 'video' }) => {
+const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, callerImage, callType = 'video', ringtoneVolume = 0.6, vibrate = true }) => {
   const [ringingTime, setRingingTime] = useState(0);
+  const audioContextRef = useRef(null);
 
   useEffect(() => {
     if (!isOpen) return;
 
-    // Play ring sound (you can add actual audio here)
-    const audio = new Audio();
-    // audio.src = '/ringtone.mp3';
-    // audio.loop = true;
-    // audio.play();
+    const playTone = () => {
+      try {
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextCtor) return;
+
+        if (!audioContextRef.current) {
+          audioContextRef.current = new AudioContextCtor();
+        }
+
+        const ctx = audioContextRef.current;
+        const now = ctx.currentTime;
+        const safeVolume = Math.max(0, Math.min(1, ringtoneVolume));
+
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, safeVolume * 0.08), now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+        gain.connect(ctx.destination);
+
+        const oscillator = ctx.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, now);
+        oscillator.frequency.linearRampToValueAtTime(660, now + 0.2);
+        oscillator.connect(gain);
+        oscillator.start(now);
+        oscillator.stop(now + 0.35);
+
+        if (vibrate && navigator.vibrate) {
+          navigator.vibrate([180, 120, 180]);
+        }
+      } catch {
+        // Ignore audio API failures caused by browser restrictions.
+      }
+    };
+
+    playTone();
+    const ringLoop = setInterval(playTone, 1800);
 
     const interval = setInterval(() => {
       setRingingTime(prev => prev + 1);
     }, 1000);
 
     return () => {
+      clearInterval(ringLoop);
       clearInterval(interval);
-      // audio.pause();
+      if (navigator.vibrate) navigator.vibrate(0);
+      audioContextRef.current?.close?.();
+      audioContextRef.current = null;
       setRingingTime(0);
     };
-  }, [isOpen]);
+  }, [isOpen, ringtoneVolume, vibrate]);
 
   if (!isOpen) return null;
 
@@ -72,6 +108,16 @@ const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, cal
             <p className="text-sm text-base-content/40 mt-2">
               {ringingTime}s
             </p>
+            <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+              <span className="badge badge-outline gap-1">
+                <Volume2Icon className="size-3.5" />
+                {Math.round(Math.max(0, Math.min(1, ringtoneVolume)) * 100)}%
+              </span>
+              <span className="badge badge-outline gap-1">
+                <SmartphoneIcon className="size-3.5" />
+                {vibrate ? 'Vibrate on' : 'Vibrate off'}
+              </span>
+            </div>
           </div>
 
           {/* Action Buttons */}

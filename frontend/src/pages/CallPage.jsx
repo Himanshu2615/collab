@@ -36,19 +36,19 @@ const CallPage = () => {
   });
 
   useEffect(() => {
+    let mounted = true;
+
     const initCall = async () => {
-      if (!tokenData.token || !authUser || !callId) return;
+      if (!tokenData?.token || !authUser || !callId) return;
 
       try {
-        console.log("Initializing Stream video client...");
-
         const user = {
           id: authUser._id,
           name: authUser.fullName,
-          image: authUser.profilePic,
+          image: authUser.profilePic?.startsWith("data:") ? "" : authUser.profilePic || "",
         };
 
-        const videoClient = new StreamVideoClient({
+        const videoClient = StreamVideoClient.getOrCreateInstance({
           apiKey: STREAM_API_KEY,
           user,
           token: tokenData.token,
@@ -58,7 +58,10 @@ const CallPage = () => {
 
         await callInstance.join({ create: true });
 
-        console.log("Joined call successfully");
+        if (!mounted) {
+          await callInstance.leave();
+          return;
+        }
 
         setClient(videoClient);
         setCall(callInstance);
@@ -66,11 +69,15 @@ const CallPage = () => {
         console.error("Error joining call:", error);
         toast.error("Could not join the call. Please try again.");
       } finally {
-        setIsConnecting(false);
+        if (mounted) setIsConnecting(false);
       }
     };
 
     initCall();
+
+    return () => {
+      mounted = false;
+    };
   }, [tokenData, authUser, callId]);
 
   if (isLoading || isConnecting) return <PageLoader />;
@@ -100,7 +107,11 @@ const CallContent = () => {
 
   const navigate = useNavigate();
 
-  if (callingState === CallingState.LEFT) return navigate("/");
+  useEffect(() => {
+    if (callingState === CallingState.LEFT) {
+      navigate("/");
+    }
+  }, [callingState, navigate]);
 
   return (
     <StreamTheme>

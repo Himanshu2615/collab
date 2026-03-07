@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
@@ -17,6 +17,7 @@ import {
   TypingIndicator,
 } from "stream-chat-react";
 import { StreamChat } from "stream-chat";
+import { StreamVideoClient } from "@stream-io/video-react-sdk";
 import toast from "react-hot-toast";
 
 import ChatLoader from "../components/ChatLoader";
@@ -29,7 +30,10 @@ import VideoCallModal from "../components/VideoCallModal";
 import CallLogsPanel from "../components/CallLogsPanel";
 import IncomingCallNotification from "../components/IncomingCallNotification";
 import {
+  HistoryIcon,
+  PhoneIcon,
   VideoIcon,
+  BellOffIcon,
   HashIcon,
   SearchIcon,
   XIcon,
@@ -56,17 +60,150 @@ const FullScreenChatPage = () => {
   const [callDuration, setCallDuration] = useState(0);
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [callId, setCallId] = useState(null);
+  const [callParticipantIds, setCallParticipantIds] = useState([]);
+  const [callParticipantNames, setCallParticipantNames] = useState([]);
+  const [callType, setCallType] = useState("video");
+  const [isInitiatingCall, setIsInitiatingCall] = useState(false);
   const [showCallLogs, setShowCallLogs] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
+  const activeIncomingCallIdRef = useRef(null);
+  const mutedIncomingCallRef = useRef(null);
+  const videoClientRef = useRef(null);
 
   const { authUser } = useAuthUser();
-  const { markAsRead } = useStreamContext();
+  const { markAsRead, notifPermission, getConversationPrefs, isMessageMuted, isCallMuted } = useStreamContext();
 
   const { data: tokenData } = useQuery({
     queryKey: ["streamToken"],
     queryFn: getStreamToken,
     enabled: !!authUser,
   });
+
+  const appendCallLog = (entry) => {
+    const logs = JSON.parse(localStorage.getItem("callLogs") || "[]");
+    logs.unshift(entry);
+    localStorage.setItem("callLogs", JSON.stringify(logs.slice(0, 50)));
+  };
+
+  useEffect(() => {
+    if (!authUser || !tokenData?.token) return;
+
+    const videoClient = StreamVideoClient.getOrCreateInstance({
+      apiKey: STREAM_API_KEY,
+      user: {
+        id: authUser._id,
+        name: authUser.fullName,
+        image: authUser.profilePic?.startsWith("data:") ? "" : authUser.profilePic || "",
+      },
+      token: tokenData.token,
+    });
+    videoClientRef.current = videoClient;
+
+    const unsubscribeRing = videoClient.on("call.ring", (event) => {
+      if (!event?.call_cid || event.user?.id === authUser._id) return;
+
+      const nextIncomingCall = {
+        callId: event.call?.id || event.call_cid.split(":")[1] || event.call_cid,
+        callerName: event.user?.name || "Someone",
+        callerImage: event.user?.image || "",
+        type: event.video ? "video" : "audio",
+        conversationId: channel?.id || null,
+        participantIds: (event.members || []).map((member) => member.user_id).filter(Boolean),
+        participantNames: (event.members || [])
+          .map((member) => member.user?.name || member.user_id)
+          .filter((name) => name && name !== authUser.fullName),
+        startedAt: event.created_at || new Date().toISOString(),
+      };
+
+      if (activeIncomingCallIdRef.current === nextIncomingCall.callId) return;
+      activeIncomingCallIdRef.current = nextIncomingCall.callId;
+
+      if (isCallMuted(channel?.id)) {
+        mutedIncomingCallRef.current = nextIncomingCall;
+        return;
+      }
+
+      setIncomingCall(nextIncomingCall);
+
+      if (notifPermission === "granted" && document.visibilityState === "hidden") {
+        try {
+          const notification = new Notification(
+            `${nextIncomingCall.callerName} is calling`,
+            {
+              body: nextIncomingCall.type === "video" ? "Incoming video call" : "Incoming audio call",
+              icon: nextIncomingCall.callerImage || "/favicon.ico",
+              tag: `call-${nextIncomingCall.callId}`,
+              renotify: true,
+            }
+          );
+
+          notification.onclick = () => {
+            window.focus();
+            navigate(`/chat/${channelOrUserId}`);
+            notification.close();
+          };
+        } catch (_) {
+          // Ignore notification API failures.
+        }
+      }
+    });
+
+    const unsubscribeReject = videoClient.on("call.rejected", (event) => {
+      const endedCallId = event.call?.id || event.call_cid?.split(":")[1];
+      if (endedCallId && activeIncomingCallIdRef.current === endedCallId) {
+        const loggedCall = incomingCall?.callId === endedCallId ? incomingCall : mutedIncomingCallRef.current?.callId === endedCallId ? mutedIncomingCallRef.current : null;
+        if (loggedCall) {
+          appendCallLog({
+            callId: endedCallId,
+            type: loggedCall.type,
+            startTime: loggedCall.startedAt || new Date().toISOString(),
+            participants: loggedCall.participantNames?.length ? loggedCall.participantNames : [loggedCall.callerName],
+            participantIds: loggedCall.participantIds || [],
+            status: "missed",
+          });
+        }
+        activeIncomingCallIdRef.current = null;
+        mutedIncomingCallRef.current = null;
+        setIncomingCall(null);
+      }
+    });
+
+    const unsubscribeAccept = videoClient.on("call.accepted", (event) => {
+      const acceptedCallId = event.call?.id || event.call_cid?.split(":")[1];
+      if (acceptedCallId && activeIncomingCallIdRef.current === acceptedCallId) {
+        activeIncomingCallIdRef.current = null;
+        mutedIncomingCallRef.current = null;
+      }
+    });
+
+    const unsubscribeEnd = videoClient.on("call.ended", (event) => {
+      const endedCallId = event.call?.id || event.call_cid?.split(":")[1];
+      if (endedCallId && activeIncomingCallIdRef.current === endedCallId) {
+        const loggedCall = incomingCall?.callId === endedCallId ? incomingCall : mutedIncomingCallRef.current?.callId === endedCallId ? mutedIncomingCallRef.current : null;
+        if (loggedCall) {
+          appendCallLog({
+            callId: endedCallId,
+            type: loggedCall.type,
+            startTime: loggedCall.startedAt || new Date().toISOString(),
+            participants: loggedCall.participantNames?.length ? loggedCall.participantNames : [loggedCall.callerName],
+            participantIds: loggedCall.participantIds || [],
+            status: "missed",
+          });
+        }
+        activeIncomingCallIdRef.current = null;
+        mutedIncomingCallRef.current = null;
+        setIncomingCall(null);
+      }
+    });
+
+    return () => {
+      unsubscribeRing?.();
+      unsubscribeReject?.();
+      unsubscribeAccept?.();
+      unsubscribeEnd?.();
+      videoClientRef.current = null;
+    };
+  }, [authUser, tokenData, notifPermission, navigate, channelOrUserId, incomingCall, isCallMuted, channel?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,6 +322,15 @@ const FullScreenChatPage = () => {
   // ── Derived values ──────────────────────────────
   const memberCount = Object.keys(channel.state.members || {}).length;
   const memberList = Object.values(channel.state.members || {});
+  const participantIds = Array.from(new Set(memberList.map((m) => m.user_id).filter(Boolean)));
+  const participantNames = Array.from(
+    new Set(
+      memberList
+        .filter((m) => m.user_id !== authUser._id)
+        .map((m) => m.user?.name || m.user_id)
+        .filter(Boolean)
+    )
+  );
   const dmPartner = !isChannel
     ? memberList.find((m) => m.user_id !== authUser._id)?.user
     : null;
@@ -193,6 +339,16 @@ const FullScreenChatPage = () => {
   const displayName = isChannel
     ? rawChannelName.replace(/^#/, "")
     : dmPartner?.name || "Direct Message";
+  const messagesMuted = isMessageMuted(channel?.id);
+  const callsMuted = isCallMuted(channel?.id);
+  const incomingCallPrefs = getConversationPrefs(incomingCall?.conversationId || channel?.id);
+  const mutedBadgeLabel = messagesMuted && callsMuted
+    ? "Muted"
+    : messagesMuted
+      ? "Messages muted"
+      : callsMuted
+        ? "Calls muted"
+        : null;
 
   const headerMembers = memberList.slice(0, 3);
   const extraCount = Math.max(0, memberCount - 3);
@@ -232,6 +388,12 @@ const FullScreenChatPage = () => {
                   <span className="font-bold text-lg text-base-content leading-tight truncate">
                     {displayName}
                   </span>
+                  {mutedBadgeLabel && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-base-200 px-2.5 py-1 text-[11px] font-semibold text-base-content/60">
+                      <BellOffIcon className="size-3.5" />
+                      {mutedBadgeLabel}
+                    </span>
+                  )}
                 </div>
                 {isChannel && (
                   <span className="text-[13px] text-base-content/60 font-medium leading-tight mt-0.5">
@@ -288,17 +450,49 @@ const FullScreenChatPage = () => {
                       </button>
                     </div>
                   ) : (
-                    <button
-                      title="Start video call"
-                      onClick={() => {
-                        setCallId(`call-${channelOrUserId}-${Date.now()}`);
-                        setShowVideoCall(true);
-                        setIsCallActive(true);
-                      }}
-                      className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
-                    >
-                      <VideoIcon className="size-[18px]" />
-                    </button>
+                    <>
+                      <button
+                        title="Start voice call"
+                        onClick={() => {
+                          if (participantIds.length < 2) {
+                            toast.error("No other participants available for this call.");
+                            return;
+                          }
+
+                          setCallId(`call-${channelOrUserId}-${Date.now()}`);
+                          setCallParticipantIds(participantIds);
+                          setCallParticipantNames(participantNames);
+                          setCallType("audio");
+                          setIsInitiatingCall(true);
+                          setShowVideoCall(true);
+                          setIsCallActive(true);
+                        }}
+                        className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
+                      >
+                        <PhoneIcon className="size-[18px]" />
+                      </button>
+
+                      <button
+                        title="Start video call"
+                        onClick={() => {
+                          if (participantIds.length < 2) {
+                            toast.error("No other participants available for this call.");
+                            return;
+                          }
+
+                          setCallId(`call-${channelOrUserId}-${Date.now()}`);
+                          setCallParticipantIds(participantIds);
+                          setCallParticipantNames(participantNames);
+                          setCallType("video");
+                          setIsInitiatingCall(true);
+                          setShowVideoCall(true);
+                          setIsCallActive(true);
+                        }}
+                        className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
+                      >
+                        <VideoIcon className="size-[18px]" />
+                      </button>
+                    </>
                   )}
 
                   <button
@@ -307,6 +501,14 @@ const FullScreenChatPage = () => {
                     className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
                   >
                     <SearchIcon className="size-[18px]" />
+                  </button>
+
+                  <button
+                    title="Call history"
+                    onClick={() => setShowCallLogs(true)}
+                    className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
+                  >
+                    <HistoryIcon className="size-[18px]" />
                   </button>
 
                   {isChannel && (
@@ -393,17 +595,32 @@ const FullScreenChatPage = () => {
       <ChannelInfoPanel channel={channel} isChannel={isChannel} isOpen={showInfo} onClose={() => setShowInfo(false)} />
       <VideoCallModal
         isOpen={showVideoCall}
-        onClose={() => { setShowVideoCall(false); setIsCallActive(false); setCallDuration(0); }}
+        onClose={() => {
+          setShowVideoCall(false);
+          setIsCallActive(false);
+          setCallDuration(0);
+          setCallParticipantIds([]);
+          setCallParticipantNames([]);
+          setCallType("video");
+          setIsInitiatingCall(false);
+        }}
         callId={callId}
         token={tokenData?.token}
         user={authUser}
-        isInitiator={true}
+        isInitiator={isInitiatingCall}
+        participantIds={callParticipantIds}
+        participantNames={callParticipantNames}
+        callType={callType}
       />
       <CallLogsPanel
         isOpen={showCallLogs}
         onClose={() => setShowCallLogs(false)}
-        onCallBack={() => {
+        onCallBack={(log) => {
           setCallId(`call-${channelOrUserId}-${Date.now()}`);
+          setCallParticipantIds(log?.participantIds?.length ? [authUser._id, ...log.participantIds] : participantIds);
+          setCallParticipantNames(log?.participants?.length ? log.participants : participantNames);
+          setCallType(log?.type || "video");
+          setIsInitiatingCall(true);
           setShowVideoCall(true);
           setIsCallActive(true);
         }}
@@ -412,27 +629,43 @@ const FullScreenChatPage = () => {
         <IncomingCallNotification
           isOpen={!!incomingCall}
           onAccept={() => {
+            activeIncomingCallIdRef.current = null;
             setCallId(incomingCall.callId);
+            setCallParticipantIds(incomingCall.participantIds || []);
+            setCallParticipantNames(incomingCall.participantNames || [incomingCall.callerName]);
+            setCallType(incomingCall.type || "video");
+            setIsInitiatingCall(false);
             setShowVideoCall(true);
             setIsCallActive(true);
             setIncomingCall(null);
           }}
-          onDecline={() => {
-            const logs = JSON.parse(localStorage.getItem("callLogs") || "[]");
-            logs.unshift({
+          onDecline={async () => {
+            activeIncomingCallIdRef.current = null;
+            try {
+              const videoClient = videoClientRef.current;
+              if (videoClient && incomingCall?.callId) {
+                const rejectedCall = videoClient.call("default", incomingCall.callId);
+                await rejectedCall.reject("decline");
+              }
+            } catch (error) {
+              console.error("Error declining call:", error);
+            }
+            appendCallLog({
               callId: incomingCall.callId,
               type: incomingCall.type,
-              startTime: new Date().toISOString(),
-              participants: [incomingCall.callerName],
+              startTime: incomingCall.startedAt || new Date().toISOString(),
+              participants: incomingCall.participantNames?.length ? incomingCall.participantNames : [incomingCall.callerName],
+              participantIds: incomingCall.participantIds || [],
               status: "missed",
             });
-            localStorage.setItem("callLogs", JSON.stringify(logs));
             setIncomingCall(null);
             toast.error("Call declined");
           }}
           callerName={incomingCall.callerName}
           callerImage={incomingCall.callerImage}
           callType={incomingCall.type}
+          ringtoneVolume={incomingCallPrefs.ringtoneVolume}
+          vibrate={incomingCallPrefs.vibrate}
         />
       )}
     </div>

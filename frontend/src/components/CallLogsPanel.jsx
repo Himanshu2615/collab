@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { XIcon, PhoneIcon, VideoIcon, ClockIcon, UserIcon, RadioIcon } from 'lucide-react';
+import { XIcon, PhoneIcon, VideoIcon, ClockIcon, RadioIcon } from 'lucide-react';
 
 const CallLogsPanel = ({ isOpen, onClose, onCallBack }) => {
   const [callLogs, setCallLogs] = useState([]);
@@ -47,7 +47,7 @@ const CallLogsPanel = ({ isOpen, onClose, onCallBack }) => {
   const filteredLogs = callLogs.filter(log => {
     if (filter === 'all') return true;
     if (filter === 'video') return log.type === 'video';
-    if (filter === 'voice') return log.type === 'voice';
+    if (filter === 'voice') return log.type === 'voice' || log.type === 'audio';
     if (filter === 'missed') return log.status === 'missed';
     return true;
   });
@@ -150,7 +150,7 @@ const CallLogsPanel = ({ isOpen, onClose, onCallBack }) => {
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <h3 className="font-semibold text-base-content">
-                            {log.participants.join(', ')}
+                            {(log.participants?.length ? log.participants : log.participantIds || ['Unknown participant']).join(', ')}
                           </h3>
                           {log.recorded && (
                             <div className="badge badge-sm badge-error gap-1">
@@ -182,7 +182,7 @@ const CallLogsPanel = ({ isOpen, onClose, onCallBack }) => {
                       {/* Call Back Button */}
                       <button
                         onClick={() => {
-                          onCallBack(log.type);
+                          onCallBack(log);
                           onClose();
                         }}
                         className="btn btn-circle btn-ghost"
