@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getStreamToken, ensureOrgChannel } from "../lib/api";
 import Avatar from "../components/Avatar";
 import { setUserImageCache, getUserImage } from "../lib/userImageCache";
+import { useStreamContext } from "../context/StreamContext";
 
 import {
   Channel,
@@ -59,6 +60,7 @@ const FullScreenChatPage = () => {
   const [incomingCall, setIncomingCall] = useState(null);
 
   const { authUser } = useAuthUser();
+  const { markAsRead } = useStreamContext();
 
   const { data: tokenData } = useQuery({
     queryKey: ["streamToken"],
@@ -128,6 +130,10 @@ const FullScreenChatPage = () => {
         if (!cancelled) {
           setChatClient(client);
           setChannel(currChannel);
+          /* Clear unread badge in sidebar instantly for DM chats */
+          if (!isOrgChannel && !predefinedChannels.includes(channelOrUserId)) {
+            markAsRead(channelOrUserId);
+          }
         }
       } catch (error) {
         if (!cancelled) {

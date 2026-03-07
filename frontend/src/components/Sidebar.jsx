@@ -1,14 +1,18 @@
 import { Link, useLocation } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import useLogout from "../hooks/useLogout";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getMyOrganization, getUserFriends } from "../lib/api";
+import { useStreamContext } from "../context/StreamContext";
 import {
   FileTextIcon,
   HashIcon,
+  LayoutDashboardIcon,
   LockIcon,
   LogOutIcon,
+  PinIcon,
   PlusIcon,
   SettingsIcon,
   ShipWheelIcon,
@@ -48,34 +52,121 @@ const ChannelItem = ({ to, name, isPrivate, currentPath }) => {
   );
 };
 
-const DmItem = ({ to, user, currentPath, onAvatarClick }) => {
-  const active = currentPath === to || currentPath.startsWith(to + "/");
-  return (
+/* ── Context menu (portal) ── */
+const DmContextMenu = ({ x, y, pinned, onPin, onClose }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    const close = (e) => {
+      if (!ref.current?.contains(e.target)) onClose();
+    };
+    const esc = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown",   esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown",   esc);
+    };
+  }, [onClose]);
+
+  return createPortal(
     <div
-      className={`flex items-center gap-2.5 mx-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
-        active
-          ? "bg-primary text-primary-content font-semibold"
-          : "text-base-content/65 hover:bg-base-content/8 hover:text-base-content"
-      }`}
+      ref={ref}
+      style={{ position: "fixed", top: y, left: x, zIndex: 9999 }}
+      className="bg-base-100 border border-base-300 rounded-lg shadow-xl py-1 min-w-36 text-sm"
     >
-      {/* Avatar — opens contact card */}
       <button
-        onClick={(e) => { e.preventDefault(); onAvatarClick(user); }}
-        className="relative flex-shrink-0 focus:outline-none group/av"
-        title="View profile"
+        onClick={onPin}
+        className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-base-200 transition-colors text-left"
       >
-        <Avatar
-          src={user.profilePic}
-          name={user.fullName}
-          size="w-5 h-5"
-          rounded="rounded-full"
-          className="group-hover/av:ring-2 group-hover/av:ring-primary transition"
-        />
-        <span className="absolute -bottom-px -right-px w-2 h-2 bg-success border border-base-100 rounded-full" />
+        <PinIcon className="size-3.5 text-base-content/50" />
+        {pinned ? "Unpin Chat" : "Pin to Top"}
       </button>
-      {/* Name — navigates to DM */}
-      <Link to={to} className="truncate flex-1">{user.fullName}</Link>
-    </div>
+    </div>,
+    document.body
+  );
+};
+
+const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned, onTogglePin }) => {
+  const active = currentPath === to || currentPath.startsWith(to + "/");
+  const [menu, setMenu] = useState(null); // { x, y } or null
+
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  return (
+    <>
+      <div
+        onContextMenu={handleContextMenu}
+        className={`group flex items-center gap-2 mx-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
+          active
+            ? "bg-primary text-primary-content font-semibold"
+            : "text-base-content/65 hover:bg-base-content/8 hover:text-base-content"
+        }`}
+      >
+        {/* Avatar — opens contact card */}
+        <button
+          onClick={(e) => { e.preventDefault(); onAvatarClick(user); }}
+          className="relative flex-shrink-0 focus:outline-none group/av"
+          title="View profile"
+        >
+          <Avatar
+            src={user.profilePic}
+            name={user.fullName}
+            size="w-5 h-5"
+            rounded="rounded-full"
+            className="group-hover/av:ring-2 group-hover/av:ring-primary transition"
+          />
+          <span className="absolute -bottom-px -right-px w-2 h-2 bg-success border border-base-100 rounded-full" />
+        </button>
+
+        {/* Name + meta — navigates to DM */}
+        <Link to={to} className="flex-1 min-w-0">
+          <div className="flex items-center gap-1">
+            <span className="truncate flex-1">{user.fullName}</span>
+            {pinned && (
+              <PinIcon className={`size-3 flex-shrink-0 ${active ? "opacity-60" : "text-base-content/30"}`} />
+            )}
+            {unread > 0 && (
+              <span className="flex-shrink-0 min-w-[18px] h-[18px] bg-primary text-primary-content rounded-full text-[10px] font-bold flex items-center justify-center px-1 leading-none">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            )}
+          </div>
+          {lastMsg && (
+            <p className={`text-[10px] truncate mt-0.5 ${
+              active ? "text-primary-content/70" : "text-base-content/40"
+            } ${unread > 0 ? "font-semibold" : ""}`}>
+              {lastMsg}
+            </p>
+          )}
+        </Link>
+
+        {/* Hover pin button */}
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTogglePin(); }}
+          title={pinned ? "Unpin" : "Pin to top"}
+          className={`flex-shrink-0 p-0.5 rounded transition-all ${
+            pinned
+              ? `${active ? "opacity-60" : "opacity-40 text-primary"}`
+              : "opacity-0 group-hover:opacity-40 hover:!opacity-80"
+          } hover:bg-base-content/10`}
+        >
+          <PinIcon className="size-3" />
+        </button>
+      </div>
+
+      {menu && (
+        <DmContextMenu
+          x={menu.x}
+          y={menu.y}
+          pinned={pinned}
+          onPin={() => { onTogglePin(); setMenu(null); }}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </>
   );
 };
 
@@ -103,6 +194,25 @@ const Sidebar = () => {
   const { pathname }    = useLocation();
   const [contactCardUser, setContactCardUser] = useState(null);
 
+  /* Stream DM metadata */
+  const { dmMeta } = useStreamContext();
+
+  /* Pinned DM user IDs — persisted in localStorage */
+  const [pinnedIds, setPinnedIds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("collab_pinned_dms") || "[]"); }
+    catch { return []; }
+  });
+
+  const togglePin = (userId) => {
+    setPinnedIds((prev) => {
+      const next = prev.includes(userId)
+        ? prev.filter((id) => id !== userId)
+        : [userId, ...prev];
+      localStorage.setItem("collab_pinned_dms", JSON.stringify(next));
+      return next;
+    });
+  };
+
   const { data: orgData } = useQuery({
     queryKey:  ["myOrganization"],
     queryFn:   getMyOrganization,
@@ -120,6 +230,19 @@ const Sidebar = () => {
   const org      = orgData?.organization;
   const channels = org?.channels || [];
   const isAdmin  = ["admin", "owner"].includes(authUser?.role);
+
+  /* Sort: pinned first, then by lastMsgAt desc */
+  const sortedFriends = [...friends].sort((a, b) => {
+    const aPinned = pinnedIds.includes(a._id);
+    const bPinned = pinnedIds.includes(b._id);
+    if (aPinned !== bPinned) return aPinned ? -1 : 1;
+    const aTime = dmMeta[a._id]?.lastMsgAt ? new Date(dmMeta[a._id].lastMsgAt).getTime() : 0;
+    const bTime = dmMeta[b._id]?.lastMsgAt ? new Date(dmMeta[b._id].lastMsgAt).getTime() : 0;
+    return bTime - aTime;
+  });
+
+  /* Total unread across all DMs */
+  const totalUnread = Object.values(dmMeta).reduce((sum, m) => sum + (m.unread || 0), 0);
 
   return (
     <aside className="w-52 bg-base-100 border-r border-base-300 hidden lg:flex flex-col h-screen sticky top-0 overflow-hidden">
@@ -150,6 +273,11 @@ const Sidebar = () => {
 
       {/* ── SCROLLABLE BODY ───────────────────── */}
       <div className="flex-1 overflow-y-auto pb-4">
+
+        {/* DASHBOARD */}
+        <div className="pt-3 pb-1">
+          <AppItem to="/" icon={LayoutDashboardIcon} label="Dashboard" currentPath={pathname} />
+        </div>
 
         {/* CHANNELS */}
         <SectionLabel
@@ -187,34 +315,45 @@ const Sidebar = () => {
         <SectionLabel
           label="Direct Messages"
           action={
-            <Link
-              to="/friends"
-              title="Browse team"
-              className="p-0.5 rounded text-base-content/30 hover:text-primary hover:bg-primary/10 transition-colors"
-            >
-              <PlusIcon className="size-3.5" />
-            </Link>
+            <div className="flex items-center gap-1.5">
+              {totalUnread > 0 && (
+                <span className="min-w-[18px] h-[18px] bg-primary text-primary-content rounded-full text-[10px] font-bold flex items-center justify-center px-1 leading-none animate-pulse">
+                  {totalUnread > 99 ? "99+" : totalUnread}
+                </span>
+              )}
+              <Link
+                to="/friends"
+                title="Browse team"
+                className="p-0.5 rounded text-base-content/30 hover:text-primary hover:bg-primary/10 transition-colors"
+              >
+                <PlusIcon className="size-3.5" />
+              </Link>
+            </div>
           }
         />
-        {friends.length > 0 ? (
-          friends.slice(0, 8).map((friend) => (
+        {sortedFriends.length > 0 ? (
+          sortedFriends.slice(0, 8).map((friend) => (
             <DmItem
               key={friend._id}
               to={`/chat/${friend._id}`}
               user={friend}
               currentPath={pathname}
               onAvatarClick={setContactCardUser}
+              unread={dmMeta[friend._id]?.unread || 0}
+              lastMsg={dmMeta[friend._id]?.lastMsg || ""}
+              pinned={pinnedIds.includes(friend._id)}
+              onTogglePin={() => togglePin(friend._id)}
             />
           ))
         ) : (
           <p className="px-5 py-1 text-xs text-base-content/30 italic">No contacts yet</p>
         )}
-        {friends.length > 8 && (
+        {sortedFriends.length > 8 && (
           <Link
             to="/friends"
             className="flex items-center mx-2 px-2 py-1.5 text-xs text-base-content/40 hover:text-primary transition-colors"
           >
-            +{friends.length - 8} more…
+            +{sortedFriends.length - 8} more…
           </Link>
         )}
 

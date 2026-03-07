@@ -23,6 +23,7 @@ import PublicRoute from "./components/PublicRoute.jsx";
 import useAuthUser from "./hooks/useAuthUser.js";
 import { useThemeStore } from "./store/useThemeStore.js";
 import { getMyOrganization } from "./lib/api.js";
+import { StreamProvider } from "./context/StreamContext.jsx";
 
 const App = () => {
   const { isLoading, authUser } = useAuthUser();
@@ -48,7 +49,8 @@ const App = () => {
 
   return (
     <div className="h-screen" data-theme={theme}>
-      <Routes>
+      <StreamProvider>
+        <Routes>
         {/* ── Public routes (redirect away when already authenticated) ── */}
         <Route
           path="/signup"
@@ -100,7 +102,8 @@ const App = () => {
         <Route path="/profile"     element={<ProtectedRoute {...guardProps}><ProfilePage /></ProtectedRoute>} />
         <Route path="/chat/:id"    element={<ProtectedRoute {...guardProps}><FullScreenChatPage /></ProtectedRoute>} />
         <Route path="/call/:id"    element={<ProtectedRoute {...guardProps} withSidebar={false}><CallPage /></ProtectedRoute>} />
-      </Routes>
+        </Routes>
+      </StreamProvider>
 
       <Toaster />
     </div>
