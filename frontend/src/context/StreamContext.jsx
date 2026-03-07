@@ -63,7 +63,7 @@ export const StreamProvider = ({ children }) => {
     enabled:  !!authUser,
   });
 
-  /* dmMeta: { [partnerUserId]: { unread, lastMsg, lastMsgAt, lastMsgSenderId, channelId } } */
+  /* dmMeta: { [partnerUserId]: { unread, lastMsg, lastMsgAt, lastMsgSenderId, channelId, partnerName, partnerImage } } */
   const [dmMeta, setDmMeta] = useState({});
   const cleanupRef = useRef(null);
   /* Keep a stable ref to authUser._id for use inside event callbacks */
@@ -103,16 +103,28 @@ export const StreamProvider = ({ children }) => {
             for (const ch of channels) {
               const partnerId = extractPartnerId(ch.id, authUser._id);
               if (!partnerId) continue;
+              
+              /* Extract partner user info from channel members */
+              const members = Object.values(ch.state.members || {});
+              const partnerMember = members.find(m => m.user_id !== authUser._id);
+              const partnerUser = partnerMember?.user;
+              
               /* ch.lastMessage() is the official SDK helper */
               const last = typeof ch.lastMessage === "function"
                 ? ch.lastMessage()
                 : ch.state.messages[ch.state.messages.length - 1];
+              
+              /* Get unread count from channel's read state or use countUnread() */
+              const unreadCount = ch.countUnread() || 0;
+              
               meta[partnerId] = {
                 channelId:       ch.id,
-                unread:          ch.countUnread() || 0,
+                unread:          unreadCount,
                 lastMsg:         msgPreview(last),
                 lastMsgAt:       last?.created_at || ch.data?.last_message_at || null,
                 lastMsgSenderId: last?.user?.id || null,
+                partnerName:     partnerUser?.name || partnerUser?.id || "Unknown",
+                partnerImage:    partnerUser?.image || "",
               };
             }
             setDmMeta(meta);
@@ -122,13 +134,16 @@ export const StreamProvider = ({ children }) => {
         }
 
         /* ── shared handler ──────────────────────────── */
-        const handleMsg = (channelId, sender, message, notif = false) => {
+        const handleMsg = (channelId, sender, message, notif = false, eventUnreadCount = undefined) => {
           const selfId    = selfIdRef.current;
           const partnerId = extractPartnerId(channelId, selfId);
           if (!partnerId) return;
 
           const isFromSelf   = sender?.id === selfId;
           const isActiveChat = window.location.pathname.includes(partnerId);
+          
+          /* For incoming messages, the sender IS the partner (unless it's from self) */
+          const partnerInfo = isFromSelf ? null : sender;
 
           /* Toast only for incoming messages when not on that chat */
           if (!isFromSelf && !isActiveChat) {
@@ -148,25 +163,46 @@ export const StreamProvider = ({ children }) => {
             );
           }
 
-          setDmMeta((prev) => ({
-            ...prev,
-            [partnerId]: {
-              channelId,
-              unread:
-                isActiveChat || isFromSelf
-                  ? (prev[partnerId]?.unread ?? 0)
-                  : (prev[partnerId]?.unread ?? 0) + 1,
-              lastMsg:         msgPreview(message),
-              lastMsgAt:       message?.created_at || new Date().toISOString(),
-              lastMsgSenderId: sender?.id || null,
-            },
-          }));
+          // Fetch exact unread count from the active channel stream structure if available
+          const cid = `messaging:${channelId}`;
+          const activeChannel = client.activeChannels?.[cid];
+          // countUnread() is only reliable AFTER the SDK has processed the event.
+          // Use it as a cross-check but fall back to prev+1 if it returns 0 unexpectedly.
+          const sdkCount = activeChannel && typeof activeChannel.countUnread === 'function'
+            ? activeChannel.countUnread()
+            : undefined;
+
+          setDmMeta((prev) => {
+            let nextUnread;
+            if (isActiveChat || isFromSelf) {
+              nextUnread = 0;
+            } else if (sdkCount !== undefined && sdkCount > 0) {
+              // SDK gave us a positive value — trust it
+              nextUnread = sdkCount;
+            } else {
+              // SDK returned 0 or unavailable — safe increment
+              nextUnread = (prev[partnerId]?.unread ?? 0) + 1;
+            }
+
+            return {
+              ...prev,
+              [partnerId]: {
+                channelId,
+                unread: nextUnread,
+                lastMsg:         msgPreview(message),
+                lastMsgAt:       message?.created_at || new Date().toISOString(),
+                lastMsgSenderId: sender?.id || null,
+                partnerName:  partnerInfo?.name  || prev[partnerId]?.partnerName  || partnerId,
+                partnerImage: partnerInfo?.image || prev[partnerId]?.partnerImage || "",
+              },
+            };
+          });
         };
 
         /* ── message.new  (watched channels) ─────────── */
         const onMessageNew = (event) => {
           if (event.channel_type !== "messaging") return;
-          handleMsg(event.channel_id, event.user, event.message, false);
+          handleMsg(event.channel_id, event.user, event.message, false, event.unread_messages);
         };
 
         /* ── notification.message_new  (un-watched / brand-new channels) ── */
@@ -174,12 +210,14 @@ export const StreamProvider = ({ children }) => {
           if (event.channel_type !== "messaging") return;
           /* event.message.user is the sender in notification events */
           const sender = event.message?.user || event.user;
-          handleMsg(event.channel_id, sender, event.message, true);
+          handleMsg(event.channel_id, sender, event.message, true, event.unread_messages);
         };
 
-        /* ── read receipts → reset unread ────────────── */
+        /* ── read receipts → reset unread only when WE read ─────────────── */
         const onMarkRead = (event) => {
           if (event.channel_type !== "messaging") return;
+          // Only reset OUR unread — ignore read events from the other person
+          if (event.user?.id !== selfIdRef.current) return;
           const partnerId = extractPartnerId(
             event.channel_id, selfIdRef.current
           );
@@ -191,16 +229,41 @@ export const StreamProvider = ({ children }) => {
           }
         };
 
+        /* ── notification.mark_unread ── */
+        const onMarkUnread = (event) => {
+          if (event.channel_type !== "messaging") return;
+          const partnerId = extractPartnerId(
+            event.channel_id, selfIdRef.current
+          );
+          if (partnerId) {
+            const cid = `messaging:${event.channel_id}`;
+            const activeChannel = client.activeChannels?.[cid];
+            
+            setDmMeta((prev) => {
+              const exactUnread = activeChannel && typeof activeChannel.countUnread === 'function' 
+                ? activeChannel.countUnread() 
+                : (event.unread_messages ?? prev[partnerId]?.unread ?? 0);
+
+              return {
+                ...prev,
+                [partnerId]: { ...(prev[partnerId] || {}), unread: Math.max(0, exactUnread) },
+              };
+            });
+          }
+        };
+
         client.on("message.new",               onMessageNew);
         client.on("notification.message_new",  onNotificationMessageNew);
         client.on("message.read",              onMarkRead);
         client.on("notification.mark_read",    onMarkRead);
+        client.on("notification.mark_unread",  onMarkUnread);
 
         cleanupRef.current = () => {
           client.off("message.new",               onMessageNew);
           client.off("notification.message_new",  onNotificationMessageNew);
           client.off("message.read",              onMarkRead);
           client.off("notification.mark_read",    onMarkRead);
+          client.off("notification.mark_unread",  onMarkUnread);
         };
       } catch (err) {
         console.error("[StreamContext] setup error:", err);

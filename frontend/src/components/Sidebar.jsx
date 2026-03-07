@@ -231,8 +231,24 @@ const Sidebar = () => {
   const channels = org?.channels || [];
   const isAdmin  = ["admin", "owner"].includes(authUser?.role);
 
-  /* Sort: pinned first, then by lastMsgAt desc */
-  const sortedFriends = [...friends].sort((a, b) => {
+  /* Build unified DM contacts list: friends + non-friend message partners */
+  const friendIds = new Set(friends.map(f => f._id));
+  
+  /* Create virtual user objects for non-friend DM partners */
+  const nonFriendDmPartners = Object.entries(dmMeta)
+    .filter(([partnerId]) => !friendIds.has(partnerId))
+    .map(([partnerId, meta]) => ({
+      _id: partnerId,
+      fullName: meta.partnerName || "Unknown",
+      profilePic: meta.partnerImage || "",
+      _isFromStream: true, // Flag to identify virtual users
+    }));
+  
+  /* Combine friends with non-friend DM partners */
+  const allDmContacts = [...friends, ...nonFriendDmPartners];
+
+  /* Sort: pinned first, then by lastMsgAt desc (most recent at top) */
+  const sortedContacts = [...allDmContacts].sort((a, b) => {
     const aPinned = pinnedIds.includes(a._id);
     const bPinned = pinnedIds.includes(b._id);
     if (aPinned !== bPinned) return aPinned ? -1 : 1;
@@ -331,29 +347,29 @@ const Sidebar = () => {
             </div>
           }
         />
-        {sortedFriends.length > 0 ? (
-          sortedFriends.slice(0, 8).map((friend) => (
+        {sortedContacts.length > 0 ? (
+          sortedContacts.slice(0, 8).map((contact) => (
             <DmItem
-              key={friend._id}
-              to={`/chat/${friend._id}`}
-              user={friend}
+              key={contact._id}
+              to={`/chat/${contact._id}`}
+              user={contact}
               currentPath={pathname}
               onAvatarClick={setContactCardUser}
-              unread={dmMeta[friend._id]?.unread || 0}
-              lastMsg={dmMeta[friend._id]?.lastMsg || ""}
-              pinned={pinnedIds.includes(friend._id)}
-              onTogglePin={() => togglePin(friend._id)}
+              unread={dmMeta[contact._id]?.unread || 0}
+              lastMsg={dmMeta[contact._id]?.lastMsg || ""}
+              pinned={pinnedIds.includes(contact._id)}
+              onTogglePin={() => togglePin(contact._id)}
             />
           ))
         ) : (
           <p className="px-5 py-1 text-xs text-base-content/30 italic">No contacts yet</p>
         )}
-        {sortedFriends.length > 8 && (
+        {sortedContacts.length > 8 && (
           <Link
             to="/friends"
             className="flex items-center mx-2 px-2 py-1.5 text-xs text-base-content/40 hover:text-primary transition-colors"
           >
-            +{sortedFriends.length - 8} more…
+            +{sortedContacts.length - 8} more…
           </Link>
         )}
 
