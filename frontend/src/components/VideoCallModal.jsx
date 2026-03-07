@@ -111,7 +111,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     const activeCall = callRef.current || call;
     if (!activeCall || !selectedSpeakerId || !activeCall.speaker?.select) return;
 
-    activeCall.speaker.select(selectedSpeakerId).catch((error) => {
+    activeCall.speaker.select(selectedSpeakerId)?.catch((error) => {
       console.error('Speaker selection error:', error);
     });
   }, [call, selectedSpeakerId]);
@@ -120,10 +120,10 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     if (!isOpen || !token || !user) return;
 
     return () => {
-      const currentCall = callRef.current || call;
+      const currentCall = callRef.current;
       if (currentCall) {
         updateCallLog(callId, { endTime: new Date().toISOString(), status: 'ended' });
-        currentCall.leave();
+        currentCall.leave().catch(() => {});
       }
       callRef.current = null;
       setCall(null);
@@ -137,7 +137,8 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
         return null;
       });
     };
-  }, [isOpen, callId, token, user, call]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, callId, token, user]);
 
   const joinCall = async () => {
     if (isJoining || call) return;

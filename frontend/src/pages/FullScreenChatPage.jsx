@@ -69,9 +69,17 @@ const FullScreenChatPage = () => {
   const activeIncomingCallIdRef = useRef(null);
   const mutedIncomingCallRef = useRef(null);
   const videoClientRef = useRef(null);
+  const channelIdRef = useRef(null);
+  const incomingCallRef = useRef(null);
+  const notifPermissionRef = useRef(null);
 
   const { authUser } = useAuthUser();
-  const { markAsRead, notifPermission, getConversationPrefs, isMessageMuted, isCallMuted } = useStreamContext();
+  const { markAsRead, notifPermission, getConversationPrefs, isMessageMuted, isCallMuted, isCallMutedLive } = useStreamContext();
+
+  /* Keep refs in sync so event-handler closures always read the latest value */
+  useEffect(() => { channelIdRef.current = channel?.id ?? null; }, [channel?.id]);
+  useEffect(() => { incomingCallRef.current = incomingCall; }, [incomingCall]);
+  useEffect(() => { notifPermissionRef.current = notifPermission; }, [notifPermission]);
 
   const { data: tokenData } = useQuery({
     queryKey: ["streamToken"],
@@ -102,12 +110,14 @@ const FullScreenChatPage = () => {
     const unsubscribeRing = videoClient.on("call.ring", (event) => {
       if (!event?.call_cid || event.user?.id === authUser._id) return;
 
+      const currentChannelId = channelIdRef.current;
+
       const nextIncomingCall = {
         callId: event.call?.id || event.call_cid.split(":")[1] || event.call_cid,
         callerName: event.user?.name || "Someone",
         callerImage: event.user?.image || "",
         type: event.video ? "video" : "audio",
-        conversationId: channel?.id || null,
+        conversationId: currentChannelId || null,
         participantIds: (event.members || []).map((member) => member.user_id).filter(Boolean),
         participantNames: (event.members || [])
           .map((member) => member.user?.name || member.user_id)
@@ -118,14 +128,14 @@ const FullScreenChatPage = () => {
       if (activeIncomingCallIdRef.current === nextIncomingCall.callId) return;
       activeIncomingCallIdRef.current = nextIncomingCall.callId;
 
-      if (isCallMuted(channel?.id)) {
+      if (isCallMutedLive(currentChannelId)) {
         mutedIncomingCallRef.current = nextIncomingCall;
         return;
       }
 
       setIncomingCall(nextIncomingCall);
 
-      if (notifPermission === "granted" && document.visibilityState === "hidden") {
+      if (notifPermissionRef.current === "granted" && document.visibilityState === "hidden") {
         try {
           const notification = new Notification(
             `${nextIncomingCall.callerName} is calling`,
@@ -148,20 +158,29 @@ const FullScreenChatPage = () => {
       }
     });
 
+    const logMissedCall = (endedCallId) => {
+      const currentIncoming = incomingCallRef.current;
+      const loggedCall = currentIncoming?.callId === endedCallId
+        ? currentIncoming
+        : mutedIncomingCallRef.current?.callId === endedCallId
+          ? mutedIncomingCallRef.current
+          : null;
+      if (loggedCall) {
+        appendCallLog({
+          callId: endedCallId,
+          type: loggedCall.type,
+          startTime: loggedCall.startedAt || new Date().toISOString(),
+          participants: loggedCall.participantNames?.length ? loggedCall.participantNames : [loggedCall.callerName],
+          participantIds: loggedCall.participantIds || [],
+          status: "missed",
+        });
+      }
+    };
+
     const unsubscribeReject = videoClient.on("call.rejected", (event) => {
       const endedCallId = event.call?.id || event.call_cid?.split(":")[1];
       if (endedCallId && activeIncomingCallIdRef.current === endedCallId) {
-        const loggedCall = incomingCall?.callId === endedCallId ? incomingCall : mutedIncomingCallRef.current?.callId === endedCallId ? mutedIncomingCallRef.current : null;
-        if (loggedCall) {
-          appendCallLog({
-            callId: endedCallId,
-            type: loggedCall.type,
-            startTime: loggedCall.startedAt || new Date().toISOString(),
-            participants: loggedCall.participantNames?.length ? loggedCall.participantNames : [loggedCall.callerName],
-            participantIds: loggedCall.participantIds || [],
-            status: "missed",
-          });
-        }
+        logMissedCall(endedCallId);
         activeIncomingCallIdRef.current = null;
         mutedIncomingCallRef.current = null;
         setIncomingCall(null);
@@ -179,17 +198,7 @@ const FullScreenChatPage = () => {
     const unsubscribeEnd = videoClient.on("call.ended", (event) => {
       const endedCallId = event.call?.id || event.call_cid?.split(":")[1];
       if (endedCallId && activeIncomingCallIdRef.current === endedCallId) {
-        const loggedCall = incomingCall?.callId === endedCallId ? incomingCall : mutedIncomingCallRef.current?.callId === endedCallId ? mutedIncomingCallRef.current : null;
-        if (loggedCall) {
-          appendCallLog({
-            callId: endedCallId,
-            type: loggedCall.type,
-            startTime: loggedCall.startedAt || new Date().toISOString(),
-            participants: loggedCall.participantNames?.length ? loggedCall.participantNames : [loggedCall.callerName],
-            participantIds: loggedCall.participantIds || [],
-            status: "missed",
-          });
-        }
+        logMissedCall(endedCallId);
         activeIncomingCallIdRef.current = null;
         mutedIncomingCallRef.current = null;
         setIncomingCall(null);
@@ -203,7 +212,7 @@ const FullScreenChatPage = () => {
       unsubscribeEnd?.();
       videoClientRef.current = null;
     };
-  }, [authUser, tokenData, notifPermission, navigate, channelOrUserId, incomingCall, isCallMuted, channel?.id]);
+  }, [authUser, tokenData, navigate, channelOrUserId, isCallMutedLive]);
 
   useEffect(() => {
     let cancelled = false;

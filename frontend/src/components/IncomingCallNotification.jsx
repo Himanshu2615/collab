@@ -23,17 +23,17 @@ const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, cal
 
         const gain = ctx.createGain();
         gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, safeVolume * 0.08), now + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.001, safeVolume * 0.3), now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
         gain.connect(ctx.destination);
 
         const oscillator = ctx.createOscillator();
         oscillator.type = 'sine';
         oscillator.frequency.setValueAtTime(880, now);
-        oscillator.frequency.linearRampToValueAtTime(660, now + 0.2);
+        oscillator.frequency.linearRampToValueAtTime(660, now + 0.3);
         oscillator.connect(gain);
         oscillator.start(now);
-        oscillator.stop(now + 0.35);
+        oscillator.stop(now + 0.5);
 
         if (vibrate && navigator.vibrate) {
           navigator.vibrate([180, 120, 180]);

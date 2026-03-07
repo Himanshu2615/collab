@@ -75,9 +75,12 @@ export const StreamProvider = ({ children }) => {
   /* dmMeta: { [partnerUserId]: { unread, lastMsg, lastMsgAt, lastMsgSenderId, channelId, partnerName, partnerImage } } */
   const [dmMeta, setDmMeta] = useState({});
   const cleanupRef = useRef(null);
-  /* Keep a stable ref to authUser._id for use inside event callbacks */
+  /* Keep stable refs for use inside event callbacks */
   const selfIdRef = useRef(null);
   useEffect(() => { selfIdRef.current = authUser?._id ?? null; }, [authUser]);
+
+  const dmMetaRef = useRef(dmMeta);
+  useEffect(() => { dmMetaRef.current = dmMeta; }, [dmMeta]);
 
   /* ── Browser notification permission ───────────── */
   const [notifPermission, setNotifPermission] = useState(
@@ -99,6 +102,9 @@ export const StreamProvider = ({ children }) => {
     }
   });
 
+  const notificationPrefsRef = useRef(notificationPrefs);
+  useEffect(() => { notificationPrefsRef.current = notificationPrefs; }, [notificationPrefs]);
+
   const updateNotificationPrefs = useCallback((updater) => {
     setNotificationPrefs((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -112,20 +118,21 @@ export const StreamProvider = ({ children }) => {
 
     const aliases = new Set();
     const selfId = selfIdRef.current;
+    const meta = dmMetaRef.current;
     const partnerId = extractPartnerId(conversationId, selfId);
 
     if (partnerId) {
       aliases.add(partnerId);
-      const partnerChannelId = dmMeta?.[partnerId]?.channelId;
+      const partnerChannelId = meta?.[partnerId]?.channelId;
       if (partnerChannelId) aliases.add(partnerChannelId);
     }
 
-    const mappedChannelId = dmMeta?.[conversationId]?.channelId;
+    const mappedChannelId = meta?.[conversationId]?.channelId;
     if (mappedChannelId) aliases.add(mappedChannelId);
 
     aliases.delete(conversationId);
     return [...aliases, conversationId];
-  }, [dmMeta]);
+  }, []);
 
   const isDefaultConversationPrefs = useCallback((prefs) => (
     !prefs?.messages &&
@@ -162,6 +169,27 @@ export const StreamProvider = ({ children }) => {
     (conversationId) => isMessageMuted(conversationId) || isCallMuted(conversationId),
     [isCallMuted, isMessageMuted]
   );
+
+  /* Ref-based mute checks for use inside long-lived event-handler closures.
+     These always read the latest notificationPrefs without needing the
+     effect to re-run. */
+  const isMessageMutedLive = useCallback((conversationId) => {
+    const aliases = getConversationAliases(conversationId);
+    const prefs = aliases.reduce(
+      (p, key) => ({ ...p, ...(notificationPrefsRef.current?.[key] || {}) }),
+      { ...DEFAULT_CONVERSATION_PREFS }
+    );
+    return !!prefs.messages;
+  }, [getConversationAliases]);
+
+  const isCallMutedLive = useCallback((conversationId) => {
+    const aliases = getConversationAliases(conversationId);
+    const prefs = aliases.reduce(
+      (p, key) => ({ ...p, ...(notificationPrefsRef.current?.[key] || {}) }),
+      { ...DEFAULT_CONVERSATION_PREFS }
+    );
+    return !!prefs.calls;
+  }, [getConversationAliases]);
 
   const toggleNotificationMute = useCallback((conversationId, type = "messages") => {
     if (!conversationId || !["messages", "calls"].includes(type)) return false;
@@ -328,7 +356,7 @@ export const StreamProvider = ({ children }) => {
           const partnerInfo = isFromSelf ? null : sender;
 
           /* Toast + browser notification only for incoming messages when not on that chat */
-          if (!isFromSelf && !isActiveChat && !isMessageMuted(channelId)) {
+          if (!isFromSelf && !isActiveChat && !isMessageMutedLive(channelId)) {
             const senderName = sender?.name || "Someone";
             const txt = msgPreview(message) || "New message";
 
@@ -500,7 +528,7 @@ export const StreamProvider = ({ children }) => {
   }, []);
 
   return (
-    <StreamContext.Provider value={{ dmMeta, markAsRead, notifPermission, requestNotifPermission, notificationPrefs, getConversationPrefs, isConversationMuted, isMessageMuted, isCallMuted, toggleConversationMute, toggleNotificationMute, updateConversationCallSetting }}>
+    <StreamContext.Provider value={{ dmMeta, markAsRead, notifPermission, requestNotifPermission, notificationPrefs, getConversationPrefs, isConversationMuted, isMessageMuted, isCallMuted, isMessageMutedLive, isCallMutedLive, toggleConversationMute, toggleNotificationMute, updateConversationCallSetting }}>
       {children}
     </StreamContext.Provider>
   );
@@ -517,6 +545,8 @@ export const useStreamContext = () =>
     isConversationMuted: () => false,
     isMessageMuted: () => false,
     isCallMuted: () => false,
+    isMessageMutedLive: () => false,
+    isCallMutedLive: () => false,
     toggleConversationMute: () => false,
     toggleNotificationMute: () => false,
     updateConversationCallSetting: () => {},
