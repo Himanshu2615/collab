@@ -24,6 +24,7 @@ import useAuthUser from "./hooks/useAuthUser.js";
 import { useThemeStore } from "./store/useThemeStore.js";
 import { getMyOrganization } from "./lib/api.js";
 import { StreamProvider } from "./context/StreamContext.jsx";
+import GlobalVideoCallHandler from "./components/GlobalVideoCallHandler.jsx";
 
 const App = () => {
   const { isLoading, authUser } = useAuthUser();
@@ -103,6 +104,7 @@ const App = () => {
         <Route path="/chat/:id"    element={<ProtectedRoute {...guardProps}><FullScreenChatPage /></ProtectedRoute>} />
         <Route path="/call/:id"    element={<ProtectedRoute {...guardProps} withSidebar={false}><CallPage /></ProtectedRoute>} />
         </Routes>
+        {isAuthenticated && isOnboarded && <GlobalVideoCallHandler />}
       </StreamProvider>
 
       <Toaster />
