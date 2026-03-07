@@ -143,6 +143,9 @@ export async function onboard(req, res) {
         profilePicUrl = uploadResponse.secure_url;
       } catch (uploadError) {
         console.error("Cloudinary upload error during onboarding:", uploadError);
+        // Never store raw base64 in MongoDB — documents become huge and API
+        // responses break for other users.  Fall back to empty (initials avatar).
+        profilePicUrl = "";
       }
     }
 
@@ -190,12 +193,18 @@ export async function updateProfile(req, res) {
         profilePicUrl = uploadResponse.secure_url;
       } catch (uploadError) {
         console.error("Cloudinary upload error during profile update:", uploadError);
+        // Never persist raw base64 in MongoDB — fall back to current stored value.
+        profilePicUrl = undefined;
       }
     }
 
+    // Build update object — omit profilePic entirely if upload failed (keeps existing value)
+    const updateFields = { fullName, bio, nativeLanguage, learningLanguage, location };
+    if (profilePicUrl !== undefined) updateFields.profilePic = profilePicUrl;
+
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { fullName, bio, nativeLanguage, learningLanguage, location, profilePic: profilePicUrl },
+      updateFields,
       { new: true, runValidators: true }
     ).select("-password").populate("organization");
 

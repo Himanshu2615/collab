@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import useLogout from "../hooks/useLogout";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getMyOrganization, getUserFriends } from "../lib/api";
 import {
@@ -12,8 +13,10 @@ import {
   SettingsIcon,
   ShipWheelIcon,
   VideoIcon,
+  UsersIcon,
 } from "lucide-react";
 import Avatar from "./Avatar";
+import ContactCard from "./ContactCard";
 
 /* ── tiny helpers ── */
 const SectionLabel = ({ label, action }) => (
@@ -45,30 +48,34 @@ const ChannelItem = ({ to, name, isPrivate, currentPath }) => {
   );
 };
 
-const DmItem = ({ to, user, currentPath }) => {
+const DmItem = ({ to, user, currentPath, onAvatarClick }) => {
   const active = currentPath === to || currentPath.startsWith(to + "/");
   return (
-    <Link
-      to={to}
+    <div
       className={`flex items-center gap-2.5 mx-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
         active
           ? "bg-primary text-primary-content font-semibold"
           : "text-base-content/65 hover:bg-base-content/8 hover:text-base-content"
       }`}
     >
-      <div className="relative flex-shrink-0">
+      {/* Avatar — opens contact card */}
+      <button
+        onClick={(e) => { e.preventDefault(); onAvatarClick(user); }}
+        className="relative flex-shrink-0 focus:outline-none group/av"
+        title="View profile"
+      >
         <Avatar
           src={user.profilePic}
           name={user.fullName}
           size="w-5 h-5"
           rounded="rounded-full"
-          className="flex-shrink-0"
+          className="group-hover/av:ring-2 group-hover/av:ring-primary transition"
         />
-        {/* online dot — hardcoded green; replace with real presence when available */}
         <span className="absolute -bottom-px -right-px w-2 h-2 bg-success border border-base-100 rounded-full" />
-      </div>
-      <span className="truncate flex-1">{user.fullName}</span>
-    </Link>
+      </button>
+      {/* Name — navigates to DM */}
+      <Link to={to} className="truncate flex-1">{user.fullName}</Link>
+    </div>
   );
 };
 
@@ -94,6 +101,7 @@ const Sidebar = () => {
   const { authUser }    = useAuthUser();
   const { logoutMutation } = useLogout();
   const { pathname }    = useLocation();
+  const [contactCardUser, setContactCardUser] = useState(null);
 
   const { data: orgData } = useQuery({
     queryKey:  ["myOrganization"],
@@ -195,6 +203,7 @@ const Sidebar = () => {
               to={`/chat/${friend._id}`}
               user={friend}
               currentPath={pathname}
+              onAvatarClick={setContactCardUser}
             />
           ))
         ) : (
@@ -211,8 +220,9 @@ const Sidebar = () => {
 
         {/* APPS */}
         <SectionLabel label="Apps" />
-        <AppItem to="/files"    icon={FileTextIcon} label="Files"    currentPath={pathname} />
-        <AppItem to="/schedule" icon={VideoIcon}    label="Meetings" currentPath={pathname} />
+        <AppItem to="/files"    icon={FileTextIcon} label="Files"          currentPath={pathname} />
+        <AppItem to="/friends"  icon={UsersIcon}    label="Team Directory" currentPath={pathname} />
+        <AppItem to="/schedule" icon={VideoIcon}    label="Meetings"       currentPath={pathname} />
         {isAdmin && (
           <AppItem to="/admin" icon={SettingsIcon} label="Settings" currentPath={pathname} />
         )}
@@ -239,6 +249,15 @@ const Sidebar = () => {
           </div>
         </Link>
       </div>
+
+      {/* Contact card modal */}
+      {contactCardUser && (
+        <ContactCard
+          user={contactCardUser}
+          selfId={authUser?._id}
+          onClose={() => setContactCardUser(null)}
+        />
+      )}
     </aside>
   );
 };

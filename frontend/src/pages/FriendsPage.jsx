@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getUserFriends } from "../lib/api";
+import { getOrgMembers } from "../lib/api";
 import FriendCard from "../components/FriendCard";
 import { UsersIcon, SearchIcon } from "lucide-react";
 import { useState } from "react";
@@ -7,10 +7,11 @@ import { useState } from "react";
 const FriendsPage = () => {
   const [search, setSearch] = useState("");
 
-  const { data: friends = [], isLoading } = useQuery({
-    queryKey: ["friends"],
-    queryFn: getUserFriends,
+  const { data: membersData, isLoading } = useQuery({
+    queryKey: ["orgMembers"],
+    queryFn:  getOrgMembers,
   });
+  const friends = membersData?.members ?? [];
 
   const filtered = friends.filter((f) =>
     f.fullName.toLowerCase().includes(search.toLowerCase()) ||

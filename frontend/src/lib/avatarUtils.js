@@ -13,17 +13,15 @@ const COLORS = [
 ];
 
 /**
- * Returns true when a URL is a real user-chosen photo.
- * Rejects empty strings and the old iran.liara.run placeholder avatars that
- * were auto-assigned at signup (they show random faces/foreign scripts).
+ * Returns true when the value is a displayable photo URL or data URI.
+ * Rejects only empty / blank values.
  */
 export function isValidAvatarUrl(url) {
-    if (!url) return false;
+    if (!url || !url.trim()) return false;
     if (url.startsWith("data:")) return true; // base64 upload — always valid
     try {
-        const { hostname } = new URL(url);
-        if (hostname === "avatar.iran.liara.run") return false;
-        return true;
+        const { protocol } = new URL(url);
+        return protocol === "http:" || protocol === "https:";
     } catch {
         return false;
     }
