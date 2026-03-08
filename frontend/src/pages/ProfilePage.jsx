@@ -214,8 +214,8 @@ const ProfilePage = () => {
                                     className="select select-bordered focus:select-primary"
                                 >
                                     <option value="">Select language…</option>
-                                    {LANGUAGES.map((l) => (
-                                        <option key={l.code} value={l.name}>{l.name}</option>
+                                    {LANGUAGES.map((language) => (
+                                        <option key={language} value={language}>{language}</option>
                                     ))}
                                 </select>
                             </div>
@@ -231,8 +231,8 @@ const ProfilePage = () => {
                                     className="select select-bordered focus:select-primary"
                                 >
                                     <option value="">Select language…</option>
-                                    {LANGUAGES.filter((l) => l.name !== form.nativeLanguage).map((l) => (
-                                        <option key={l.code} value={l.name}>{l.name}</option>
+                                    {LANGUAGES.filter((language) => language !== form.nativeLanguage).map((language) => (
+                                        <option key={language} value={language}>{language}</option>
                                     ))}
                                 </select>
                             </div>

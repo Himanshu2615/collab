@@ -176,7 +176,6 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
         // The `data.members` array includes both the caller and all callees.
         await videoCall.getOrCreate({
           ring: true,
-          notify: true,
           video: callType === 'video',
           data: {
             members: uniqueParticipantIds.map((id) => ({ user_id: id })),
