@@ -4,6 +4,7 @@ import useLogout from "../hooks/useLogout";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
+import toast from "react-hot-toast";
 import { getMyOrganization, getUserFriends } from "../lib/api";
 import { useStreamContext } from "../context/StreamContext";
 import {
@@ -55,7 +56,7 @@ const ChannelItem = ({ to, name, isPrivate, currentPath }) => {
 };
 
 /* ── Context menu (portal) ── */
-const DmContextMenu = ({ x, y, pinned, onPin, onClose }) => {
+const DmContextMenu = ({ x, y, pinned, muted, onPin, onToggleMute, onClose }) => {
   const ref = useRef(null);
   useEffect(() => {
     const close = (e) => {
@@ -74,7 +75,7 @@ const DmContextMenu = ({ x, y, pinned, onPin, onClose }) => {
     <div
       ref={ref}
       style={{ position: "fixed", top: y, left: x, zIndex: 9999 }}
-      className="bg-base-100 border border-base-300 rounded-lg shadow-xl py-1 min-w-36 text-sm"
+      className="bg-base-100 border border-base-300 rounded-lg shadow-xl py-1 min-w-44 text-sm"
     >
       <button
         onClick={onPin}
@@ -83,12 +84,20 @@ const DmContextMenu = ({ x, y, pinned, onPin, onClose }) => {
         <PinIcon className="size-3.5 text-base-content/50" />
         {pinned ? "Unpin Chat" : "Pin to Top"}
       </button>
+      <button
+        onClick={onToggleMute}
+        className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-base-200 transition-colors text-left"
+      >
+        {muted
+          ? <><BellIcon className="size-3.5 text-success" /> Unmute Notifications</>
+          : <><BellOffIcon className="size-3.5 text-base-content/50" /> Mute Notifications</>}
+      </button>
     </div>,
     document.body
   );
 };
 
-const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned, onTogglePin }) => {
+const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned, muted, onTogglePin, onToggleMute }) => {
   const active = currentPath === to || currentPath.startsWith(to + "/");
   const [menu, setMenu] = useState(null); // { x, y } or null
 
@@ -130,6 +139,9 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
             {pinned && (
               <PinIcon className={`size-3 flex-shrink-0 ${active ? "opacity-60" : "text-base-content/30"}`} />
             )}
+            {muted && (
+              <BellOffIcon className={`size-3 flex-shrink-0 ${active ? "opacity-60" : "text-base-content/30"}`} />
+            )}
             {unread > 0 && (
               <span className="flex-shrink-0 min-w-[18px] h-[18px] bg-primary text-primary-content rounded-full text-[10px] font-bold flex items-center justify-center px-1 leading-none">
                 {unread > 9 ? "9+" : unread}
@@ -164,7 +176,9 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
           x={menu.x}
           y={menu.y}
           pinned={pinned}
+          muted={muted}
           onPin={() => { onTogglePin(); setMenu(null); }}
+          onToggleMute={() => { onToggleMute(); setMenu(null); }}
           onClose={() => setMenu(null)}
         />
       )}
@@ -197,7 +211,7 @@ const Sidebar = () => {
   const [contactCardUser, setContactCardUser] = useState(null);
 
   /* Stream DM metadata */
-  const { dmMeta, notifPermission, requestNotifPermission } = useStreamContext();
+  const { dmMeta, notifPermission, requestNotifPermission, isMessageMuted, toggleNotificationMute } = useStreamContext();
 
   /* Pinned DM user IDs — persisted in localStorage */
   const [pinnedIds, setPinnedIds] = useState(() => {
@@ -342,19 +356,36 @@ const Sidebar = () => {
               {/* Browser notification toggle button */}
               {notifPermission !== "unsupported" && (
                 notifPermission === "granted" ? (
-                  <span
-                    title="Browser notifications enabled"
-                    className="p-0.5 rounded text-success cursor-default"
+                  <button
+                    title="Browser notifications enabled — click for info"
+                    className="p-0.5 rounded text-success hover:bg-success/10 transition-colors"
+                    onClick={() =>
+                      toast.success(
+                        "Browser notifications are on. To disable, click the lock icon in your browser's address bar.",
+                        { duration: 5000 }
+                      )
+                    }
                   >
                     <BellIcon className="size-3.5" />
-                  </span>
+                  </button>
                 ) : notifPermission === "denied" ? (
-                  <span
-                    title="Notifications blocked — open browser settings to allow"
-                    className="p-0.5 rounded text-error cursor-default"
+                  <button
+                    title="Notifications blocked — click for help"
+                    className="p-0.5 rounded text-error hover:bg-error/10 transition-colors"
+                    onClick={async () => {
+                      // Try re-requesting — works in Firefox; Chrome will show
+                      // the address-bar blocked indicator so user can unblock.
+                      const result = await requestNotifPermission();
+                      if (result !== "granted") {
+                        toast(
+                          "Notifications are blocked. Click the 🔒 lock icon in your browser's address bar and set Notifications to 'Allow'.",
+                          { duration: 7000, icon: "🔔" }
+                        );
+                      }
+                    }}
                   >
                     <BellOffIcon className="size-3.5" />
-                  </span>
+                  </button>
                 ) : (
                   <button
                     onClick={requestNotifPermission}
@@ -376,19 +407,33 @@ const Sidebar = () => {
           }
         />
         {sortedContacts.length > 0 ? (
-          sortedContacts.slice(0, 8).map((contact) => (
-            <DmItem
-              key={contact._id}
-              to={`/chat/${contact._id}`}
-              user={contact}
-              currentPath={pathname}
-              onAvatarClick={setContactCardUser}
-              unread={dmMeta[contact._id]?.unread || 0}
-              lastMsg={dmMeta[contact._id]?.lastMsg || ""}
-              pinned={pinnedIds.includes(contact._id)}
-              onTogglePin={() => togglePin(contact._id)}
-            />
-          ))
+        sortedContacts.slice(0, 8).map((contact) => {
+            // Compute the DM channel ID (sorted join) so we can read and toggle
+            // the per-conversation mute preference.
+            const dmChannelId = authUser
+              ? [authUser._id, contact._id].sort().join("-")
+              : null;
+            const isMuted = dmChannelId ? isMessageMuted(dmChannelId) : false;
+
+            return (
+              <DmItem
+                key={contact._id}
+                to={`/chat/${contact._id}`}
+                user={contact}
+                currentPath={pathname}
+                onAvatarClick={setContactCardUser}
+                unread={dmMeta[contact._id]?.unread || 0}
+                lastMsg={dmMeta[contact._id]?.lastMsg || ""}
+                pinned={pinnedIds.includes(contact._id)}
+                muted={isMuted}
+                onTogglePin={() => togglePin(contact._id)}
+                onToggleMute={() => {
+                  if (!dmChannelId) return;
+                  toggleNotificationMute(dmChannelId, "messages");
+                }}
+              />
+            );
+          })
         ) : (
           <p className="px-5 py-1 text-xs text-base-content/30 italic">No contacts yet</p>
         )}

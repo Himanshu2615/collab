@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { StreamChat } from "stream-chat";
 import toast from "react-hot-toast";
 import { Link } from "react-router";
 import { getStreamToken } from "../lib/api";
@@ -62,14 +61,26 @@ const DEFAULT_CONVERSATION_PREFS = {
   vibrate: true,
 };
 
+let streamChatClassPromise;
+const getStreamChatClass = async () => {
+  if (!streamChatClassPromise) {
+    streamChatClassPromise = import("stream-chat").then((mod) => mod.StreamChat);
+  }
+  return streamChatClassPromise;
+};
+
 /* ════════════════════════════════════════════════ */
 export const StreamProvider = ({ children }) => {
   const { authUser } = useAuthUser();
+  const shouldBootstrapStream = Boolean(authUser?._id && authUser?.isOnboarded && authUser?.organization);
 
   const { data: tokenData } = useQuery({
     queryKey: ["streamToken"],
-    queryFn:  getStreamToken,
-    enabled:  !!authUser,
+    queryFn: getStreamToken,
+    enabled: shouldBootstrapStream,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   /* dmMeta: { [partnerUserId]: { unread, lastMsg, lastMsgAt, lastMsgSenderId, channelId, partnerName, partnerImage } } */
@@ -281,11 +292,13 @@ export const StreamProvider = ({ children }) => {
   }, [authUser]);
 
   useEffect(() => {
-    if (!tokenData?.token || !authUser) return;
+    if (!shouldBootstrapStream || !tokenData?.token || !authUser) return;
     let isMounted = true;
+    let scheduledSeed = null;
 
     const setup = async () => {
       try {
+        const StreamChat = await getStreamChatClass();
         const client = StreamChat.getInstance(STREAM_API_KEY);
 
         /* Connect only once */
@@ -299,49 +312,6 @@ export const StreamProvider = ({ children }) => {
         }
 
         if (!isMounted) return;
-
-        /* ── seed dmMeta from existing channels ──────── */
-        try {
-          const channels = await client.queryChannels(
-            { type: "messaging", members: { $in: [authUser._id] } },
-            [{ last_message_at: -1 }],
-            { watch: true, state: true, limit: 30, message_limit: 1 }
-          );
-
-          if (isMounted) {
-            const meta = {};
-            for (const ch of channels) {
-              const partnerId = extractPartnerId(ch.id, authUser._id);
-              if (!partnerId) continue;
-              
-              /* Extract partner user info from channel members */
-              const members = Object.values(ch.state.members || {});
-              const partnerMember = members.find(m => m.user_id !== authUser._id);
-              const partnerUser = partnerMember?.user;
-              
-              /* ch.lastMessage() is the official SDK helper */
-              const last = typeof ch.lastMessage === "function"
-                ? ch.lastMessage()
-                : ch.state.messages[ch.state.messages.length - 1];
-              
-              /* Get unread count from channel's read state or use countUnread() */
-              const unreadCount = ch.countUnread() || 0;
-              
-              meta[partnerId] = {
-                channelId:       ch.id,
-                unread:          unreadCount,
-                lastMsg:         msgPreview(last),
-                lastMsgAt:       last?.created_at || ch.data?.last_message_at || null,
-                lastMsgSenderId: last?.user?.id || null,
-                partnerName:     partnerUser?.name || partnerUser?.id || "Unknown",
-                partnerImage:    partnerUser?.image || "",
-              };
-            }
-            setDmMeta(meta);
-          }
-        } catch (qErr) {
-          console.warn("[StreamContext] queryChannels failed:", qErr);
-        }
 
         /* ── shared handler ──────────────────────────── */
         const handleMsg = (channelId, sender, message, notif = false, eventUnreadCount = undefined) => {
@@ -486,7 +456,66 @@ export const StreamProvider = ({ children }) => {
         client.on("notification.mark_read",    onMarkRead);
         client.on("notification.mark_unread",  onMarkUnread);
 
+        const seedExistingChannels = async () => {
+          try {
+            const channels = await client.queryChannels(
+              { type: "messaging", members: { $in: [authUser._id] } },
+              [{ last_message_at: -1 }],
+              { watch: true, state: true, limit: 30, message_limit: 1 }
+            );
+
+            if (isMounted) {
+              const meta = {};
+              for (const ch of channels) {
+                const partnerId = extractPartnerId(ch.id, authUser._id);
+                if (!partnerId) continue;
+
+                const members = Object.values(ch.state.members || {});
+                const partnerMember = members.find((m) => m.user_id !== authUser._id);
+                const partnerUser = partnerMember?.user;
+
+                const last = typeof ch.lastMessage === "function"
+                  ? ch.lastMessage()
+                  : ch.state.messages[ch.state.messages.length - 1];
+
+                meta[partnerId] = {
+                  channelId: ch.id,
+                  unread: ch.countUnread() || 0,
+                  lastMsg: msgPreview(last),
+                  lastMsgAt: last?.created_at || ch.data?.last_message_at || null,
+                  lastMsgSenderId: last?.user?.id || null,
+                  partnerName: partnerUser?.name || partnerUser?.id || "Unknown",
+                  partnerImage: partnerUser?.image || "",
+                };
+              }
+              setDmMeta(meta);
+            }
+          } catch (qErr) {
+            console.warn("[StreamContext] queryChannels failed:", qErr);
+          }
+        };
+
+        if (typeof window.requestIdleCallback === "function") {
+          scheduledSeed = window.requestIdleCallback(() => {
+            scheduledSeed = null;
+            seedExistingChannels();
+          }, { timeout: 1200 });
+        } else {
+          scheduledSeed = window.setTimeout(() => {
+            scheduledSeed = null;
+            seedExistingChannels();
+          }, 250);
+        }
+
         cleanupRef.current = () => {
+          if (scheduledSeed) {
+            if (typeof window.cancelIdleCallback === "function") {
+              window.cancelIdleCallback(scheduledSeed);
+            } else {
+              window.clearTimeout(scheduledSeed);
+            }
+            scheduledSeed = null;
+          }
           client.off("message.new",               onMessageNew);
           client.off("notification.message_new",  onNotificationMessageNew);
           client.off("message.read",              onMarkRead);
@@ -505,7 +534,7 @@ export const StreamProvider = ({ children }) => {
       cleanupRef.current?.();
       cleanupRef.current = null;
     };
-  }, [tokenData, authUser]);
+  }, [authUser, shouldBootstrapStream, tokenData]);
 
   const markAsRead = useCallback(async (partnerId) => {
     setDmMeta((prev) => ({
@@ -515,6 +544,7 @@ export const StreamProvider = ({ children }) => {
 
     // Also tell Stream to mark it as read for sync across devices
     try {
+      const StreamChat = await getStreamChatClass();
       const client = StreamChat.getInstance(STREAM_API_KEY);
       const selfId = selfIdRef.current;
       if (!selfId || !partnerId) return;

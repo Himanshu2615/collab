@@ -4,6 +4,8 @@ import crypto from "crypto";
 const channelSchema = new mongoose.Schema({
     name: { type: String, required: true, trim: true, lowercase: true },
     description: { type: String, default: "" },
+    isPrivate: { type: Boolean, default: false },
+    members: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     isDefault: { type: Boolean, default: false }, // default channels can't be deleted
 }, { _id: true, timestamps: false });
 
@@ -44,8 +46,8 @@ const organizationSchema = new mongoose.Schema(
         channels: {
             type: [channelSchema],
             default: [
-                { name: "general", description: "General discussion", isDefault: true },
-                { name: "announcements", description: "Important announcements", isDefault: true },
+                { name: "general", description: "General discussion", isDefault: true, isPrivate: false, members: [] },
+                { name: "announcements", description: "Important announcements", isDefault: true, isPrivate: false, members: [] },
             ],
         },
     },

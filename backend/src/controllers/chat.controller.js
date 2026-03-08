@@ -1,5 +1,4 @@
 import { generateStreamToken, ensureStreamChannel } from "../lib/stream.js";
-import User from "../models/User.js";
 import Organization from "../models/Organization.js";
 
 export async function getStreamToken(req, res) {
@@ -25,10 +24,10 @@ export async function ensureOrgChannel(req, res) {
     const { channelId } = req.body;
     if (!channelId) return res.status(400).json({ message: "channelId is required" });
 
-    const user = await User.findById(req.user._id).select("organization");
-    if (!user?.organization) return res.status(403).json({ message: "Not in an organization" });
+    // req.user already loaded by middleware — skip redundant DB call
+    if (!req.user?.organization) return res.status(403).json({ message: "Not in an organization" });
 
-    const org = await Organization.findById(user.organization).select("slug channels");
+    const org = await Organization.findById(req.user.organization).select("slug channels").lean();
     if (!org) return res.status(404).json({ message: "Organization not found" });
 
     // Validate the channel belongs to this org
@@ -38,12 +37,27 @@ export async function ensureOrgChannel(req, res) {
     }
 
     const channelName = channelId.slice(expectedPrefix.length);
+    const channelConfig = org.channels?.find((channel) => channel.name === channelName);
+    if (!channelConfig) {
+      return res.status(404).json({ message: "Channel not found" });
+    }
+
+    const canAccess = !channelConfig.isPrivate
+      || ["admin", "owner"].includes(req.user.role)
+      || channelConfig.members?.some((memberId) => memberId.toString() === req.user._id.toString());
+
+    if (!canAccess) {
+      return res.status(403).json({ message: "You do not have access to this channel" });
+    }
 
     await ensureStreamChannel({
       channelId,
       channelName,
       orgSlug: org.slug,
-      userId:  req.user._id.toString(),
+      userId: req.user._id.toString(),
+      memberIds: channelConfig.isPrivate ? (channelConfig.members || []).map((memberId) => memberId.toString()) : [],
+      description: channelConfig.description || "",
+      isPrivate: !!channelConfig.isPrivate,
     });
 
     res.status(200).json({ success: true });

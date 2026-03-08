@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "stream-chat-react/dist/css/v2/index.css";
 import { useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
@@ -70,6 +71,9 @@ const FullScreenChatPage = () => {
     queryKey: ["streamToken"],
     queryFn: getStreamToken,
     enabled: !!authUser,
+    // Token is long-lived — don't refetch on every mount; this lets initChat
+    // start immediately on subsequent channel navigations.
+    staleTime: 30 * 60 * 1000,
   });
 
   useEffect(() => {
@@ -81,6 +85,8 @@ const FullScreenChatPage = () => {
     setShowSearch(false);
 
     const initChat = async () => {
+      // If token or user aren't ready yet, keep the loader spinning.
+      // The effect will re-run when tokenData / authUser populate.
       if (!tokenData?.token || !authUser) return;
 
       try {
@@ -108,34 +114,61 @@ const FullScreenChatPage = () => {
           if (!cancelled) setIsChannel(true);
 
           if (isOrgChannel) {
-            // Let the backend (admin Stream client) create the channel and add
-            // this user as a member — avoids the client-side team-scope
-            // ReadChannel/CreateChannel permission error.
-            await ensureOrgChannel(channelOrUserId);
             currChannel = client.channel("team", channelOrUserId);
+
+            // Optimistically try to watch first — avoids the backend round-trip
+            // for channels the user is already a member of.
+            try {
+              await currChannel.watch();
+            } catch {
+              // Not a member yet: ask the backend to create/add us, then retry.
+              await ensureOrgChannel(channelOrUserId);
+              await currChannel.watch();
+            }
           } else {
-            // Legacy hard-coded channel names (no org prefix)
+            // Legacy hard-coded channel names — collapse create+addMembers+watch
+            // into a single query that creates-or-gets in one round-trip.
             currChannel = client.channel("team", channelOrUserId, {
               name: `#${channelOrUserId}`,
               created_by_id: authUser._id,
             });
-            await currChannel.create();
-            await currChannel.addMembers([authUser._id]);
+            await currChannel.watch();
+            // Best-effort member add (no-op if already a member).
+            currChannel.addMembers([authUser._id]).catch(() => {});
           }
         } else {
           if (!cancelled) setIsChannel(false);
           const channelId = [authUser._id, channelOrUserId].sort().join("-");
+
+          // StreamContext already watches all DM channels at boot via queryChannels.
+          // Reuse that cached channel object so we can render instantly without
+          // an extra network round-trip.
+          const cid = `messaging:${channelId}`;
+          const cached = client.activeChannels?.[cid];
+
+          if (cached) {
+            // Render immediately from cache.
+            if (!cancelled) {
+              setChatClient(client);
+              setChannel(cached);
+              setLoading(false);
+              markAsRead(channelOrUserId);
+            }
+            // Background refresh to catch any messages received while away.
+            cached.watch().catch(() => {});
+            return;
+          }
+
+          // Channel not cached yet (first DM ever) — normal watch path.
           currChannel = client.channel("messaging", channelId, {
             members: [authUser._id, channelOrUserId],
           });
+          await currChannel.watch();
         }
-
-        await currChannel.watch();
 
         if (!cancelled) {
           setChatClient(client);
           setChannel(currChannel);
-          /* Clear unread badge in sidebar instantly for DM chats */
           if (!isOrgChannel && !predefinedChannels.includes(channelOrUserId)) {
             markAsRead(channelOrUserId);
           }
@@ -145,9 +178,11 @@ const FullScreenChatPage = () => {
           console.error("Error initializing chat:", error);
           toast.error("Could not connect to chat. Please try again.");
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
+
+      // Only clear loading after real work was attempted (not on the early
+      // return when token/user aren't available yet).
+      if (!cancelled) setLoading(false);
     };
 
     initChat();

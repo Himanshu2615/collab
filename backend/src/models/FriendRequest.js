@@ -23,6 +23,11 @@ const friendRequestSchema = new mongoose.Schema(
   }
 );
 
+// Cover the most common query patterns
+friendRequestSchema.index({ recipient: 1, status: 1 });
+friendRequestSchema.index({ sender: 1, status: 1 });
+friendRequestSchema.index({ sender: 1, recipient: 1 }, { unique: true });
+
 const FriendRequest = mongoose.model("FriendRequest", friendRequestSchema);
 
 export default FriendRequest;

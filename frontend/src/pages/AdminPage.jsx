@@ -17,6 +17,9 @@ import {
   HashIcon,
   CopyIcon,
   Building2,
+  LockIcon,
+  GlobeIcon,
+  UserPlusIcon,
 
   LoaderIcon,
   XIcon,
@@ -27,7 +30,7 @@ import { useState } from "react";
 const AdminPage = () => {
   const { authUser } = useAuthUser();
   const queryClient = useQueryClient();
-  const [newChannel, setNewChannel] = useState({ name: "", description: "" });
+  const [newChannel, setNewChannel] = useState({ name: "", description: "", memberIds: [] });
   const [showAddChannel, setShowAddChannel] = useState(false);
 
   const { data: orgData, isLoading: orgLoading } = useQuery({
@@ -45,6 +48,7 @@ const AdminPage = () => {
   const org = orgData?.organization;
   const members = membersData?.members || [];
   const isAdminOrOwner = ["admin", "owner"].includes(authUser?.role);
+  const isPrivateChannel = newChannel.memberIds.length > 0;
 
   const { mutate: regenCode, isPending: regenPending } = useMutation({
     mutationFn: regenerateInviteCode,
@@ -59,7 +63,7 @@ const AdminPage = () => {
     mutationFn: createOrgChannel,
     onSuccess: () => {
       toast.success("Channel created!");
-      setNewChannel({ name: "", description: "" });
+      setNewChannel({ name: "", description: "", memberIds: [] });
       setShowAddChannel(false);
       queryClient.invalidateQueries({ queryKey: ["myOrganization"] });
     },
@@ -79,6 +83,15 @@ const AdminPage = () => {
     if (!org?.inviteCode) return;
     navigator.clipboard.writeText(org.inviteCode);
     toast.success("Invite code copied!");
+  };
+
+  const toggleChannelMember = (memberId) => {
+    setNewChannel((prev) => ({
+      ...prev,
+      memberIds: prev.memberIds.includes(memberId)
+        ? prev.memberIds.filter((id) => id !== memberId)
+        : [...prev.memberIds, memberId],
+    }));
   };
 
   if (orgLoading) {
@@ -200,6 +213,80 @@ const AdminPage = () => {
                 onChange={(e) => setNewChannel((p) => ({ ...p, description: e.target.value }))}
                 className="input input-bordered input-sm w-full"
               />
+              <div className="rounded-xl border border-base-content/10 bg-base-100/60 p-3">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <p className="text-sm font-semibold">Channel audience</p>
+                    <p className="text-xs text-base-content/50">
+                      Leave everyone unchecked for a public channel, or pick specific members for a private group.
+                    </p>
+                  </div>
+                  <span className={`badge ${isPrivateChannel ? "badge-secondary" : "badge-success"}`}>
+                    {isPrivateChannel ? "Private" : "Public"}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setNewChannel((p) => ({ ...p, memberIds: [] }))}
+                    className={`btn btn-xs gap-1 ${!isPrivateChannel ? "btn-success" : "btn-outline"}`}
+                  >
+                    <GlobeIcon className="size-3" /> Everyone in workspace
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewChannel((p) => ({
+                      ...p,
+                      memberIds: members.filter((member) => member._id !== authUser?._id).map((member) => member._id),
+                    }))}
+                    className="btn btn-xs btn-outline gap-1"
+                  >
+                    <UserPlusIcon className="size-3" /> Select all members
+                  </button>
+                </div>
+
+                <div className="max-h-44 overflow-y-auto space-y-2 pr-1">
+                  {members
+                    .filter((member) => member._id !== authUser?._id)
+                    .map((member) => {
+                      const isSelected = newChannel.memberIds.includes(member._id);
+                      return (
+                        <label
+                          key={member._id}
+                          className={`flex items-center gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
+                            isSelected
+                              ? "border-secondary bg-secondary/10"
+                              : "border-base-content/10 hover:bg-base-200"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="checkbox checkbox-xs checkbox-secondary"
+                            checked={isSelected}
+                            onChange={() => toggleChannelMember(member._id)}
+                          />
+                          <div className="avatar">
+                            <div className="w-8 rounded-full bg-base-200 overflow-hidden">
+                              {member.profilePic ? (
+                                <img src={member.profilePic} alt={member.fullName} />
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate">{member.fullName}</p>
+                            <p className="text-xs text-base-content/50 capitalize">{member.role || "member"}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                </div>
+                {isPrivateChannel && (
+                  <p className="text-xs text-base-content/50 mt-3">
+                    Selected members plus you will be added to this private channel.
+                  </p>
+                )}
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => addChannel(newChannel)}
@@ -222,9 +309,21 @@ const AdminPage = () => {
                 key={ch._id}
                 className="flex items-center gap-3 p-3 bg-base-300 rounded-xl"
               >
-                <HashIcon className="size-4 text-primary flex-shrink-0" />
+                {ch.isPrivate ? (
+                  <LockIcon className="size-4 text-secondary flex-shrink-0" />
+                ) : (
+                  <HashIcon className="size-4 text-primary flex-shrink-0" />
+                )}
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm">{ch.name}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-medium text-sm">{ch.name}</p>
+                    <span className={`badge badge-xs ${ch.isPrivate ? "badge-secondary" : "badge-ghost"}`}>
+                      {ch.isPrivate ? "private" : "public"}
+                    </span>
+                    {ch.isPrivate && (
+                      <span className="badge badge-outline badge-xs">{(ch.members?.length || 0)} members</span>
+                    )}
+                  </div>
                   {ch.description && <p className="text-xs text-base-content/50 truncate">{ch.description}</p>}
                 </div>
                 {ch.isDefault ? (

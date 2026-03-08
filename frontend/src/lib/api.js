@@ -1,4 +1,6 @@
 import { axiosInstance } from "./axios";
+import { clearCachedAuthUser, setCachedAuthUser } from "./authCache";
+import { clearCachedDashboardSummary, setCachedDashboardSummary } from "./dashboardCache";
 
 export const signup = async (signupData) => {
   const response = await axiosInstance.post("/auth/signup", signupData);
@@ -17,9 +19,11 @@ export const logout = async () => {
 export const getAuthUser = async () => {
   try {
     const res = await axiosInstance.get("/auth/me");
+    setCachedAuthUser(res.data);
     return res.data;
   } catch (error) {
     console.log("Error in getAuthUser:", error);
+    clearCachedAuthUser();
     return null;
   }
 };
@@ -96,6 +100,17 @@ export const deleteMeeting = async (id) => {
 export async function getUserFriends() {
   const response = await axiosInstance.get("/users/friends");
   return response.data;
+}
+
+export async function getDashboardSummary() {
+  try {
+    const response = await axiosInstance.get("/users/dashboard-summary");
+    setCachedDashboardSummary(response.data);
+    return response.data;
+  } catch (error) {
+    clearCachedDashboardSummary();
+    throw error;
+  }
 }
 
 export async function getRecommendedUsers() {

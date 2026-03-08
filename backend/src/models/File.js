@@ -47,6 +47,7 @@ const fileSchema = new mongoose.Schema(
 
 // Index for fast organization-scoped file lookups
 fileSchema.index({ organization: 1, createdAt: -1 });
+fileSchema.index({ folder: 1 });
 
 const File = mongoose.model("File", fileSchema);
 

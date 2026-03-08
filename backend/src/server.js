@@ -2,6 +2,7 @@ import express from "express";
 import "dotenv/config";
 import cookieParser from "cookie-parser";
 import cors from "cors";
+import compression from "compression";
 import path from "path";
 
 import authRoutes from "./routes/auth.route.js";
@@ -28,6 +29,9 @@ app.use(
   })
 );
 
+// Compress all responses — typically 60-80% smaller JSON payloads
+app.use(compression());
+
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 
@@ -49,7 +53,9 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  connectDB();
+// Connect to MongoDB BEFORE accepting requests
+connectDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
 });

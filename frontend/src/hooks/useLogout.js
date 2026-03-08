@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { logout } from "../lib/api";
 import { StreamChat } from "stream-chat";
+import { clearCachedAuthUser } from "../lib/authCache";
+import { clearCachedDashboardSummary } from "../lib/dashboardCache";
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 
@@ -20,6 +22,8 @@ const useLogout = () => {
         const client = StreamChat.getInstance(STREAM_API_KEY);
         if (client.userID) await client.disconnectUser();
       } catch (_) {}
+      clearCachedAuthUser();
+      clearCachedDashboardSummary();
       queryClient.clear();
     },
   });

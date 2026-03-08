@@ -17,7 +17,8 @@ export const getMeetings = async (req, res) => {
 
         const meetings = await Meeting.find(filter)
             .populate("participants", "fullName profilePic")
-            .sort({ startTime: 1 });
+            .sort({ startTime: 1 })
+            .lean();
 
         res.status(200).json(meetings);
     } catch (error) {

@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import {
   CalendarIcon,
@@ -10,8 +9,8 @@ import {
   HashIcon,
   ChevronRightIcon,
 } from "lucide-react";
-import { getMeetings, getFiles, getOrgMembers, getFriendRequests } from "../lib/api";
 import useAuthUser from "../hooks/useAuthUser";
+import useDashboardSummary from "../hooks/useDashboardSummary";
 import Avatar from "../components/Avatar";
 
 /* ── helpers ───────────────────────────────── */
@@ -20,18 +19,6 @@ const getGreeting = () => {
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
   return "Good evening";
-};
-
-const todayStart = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-};
-
-const todayEnd = () => {
-  const d = new Date();
-  d.setHours(23, 59, 59, 999);
-  return d.toISOString();
 };
 
 const fmtTime = (d) =>
@@ -84,39 +71,14 @@ const HomePage = () => {
   const { authUser } = useAuthUser();
   const firstName = authUser?.fullName?.split(" ")[0] ?? "there";
 
-  /* Today's meetings */
-  const { data: todayMeetings = [], isLoading: loadingMeetings } = useQuery({
-    queryKey: ["meetings", "today"],
-    queryFn:  () => getMeetings({ from: todayStart(), to: todayEnd() }),
-    staleTime: 60_000,
-  });
+  const { data: dashboardData, isLoading: dashboardLoading } = useDashboardSummary();
+  const showSectionLoaders = dashboardLoading && !dashboardData;
 
-  /* Recent files */
-  const { data: filesData = [], isLoading: loadingFiles } = useQuery({
-    queryKey: ["files"],
-    queryFn:  getFiles,
-    staleTime: 30_000,
-  });
-  const recentFiles = [...filesData]
-    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-    .slice(0, 5);
-
-  /* Team members */
-  const { data: membersData, isLoading: loadingMembers } = useQuery({
-    queryKey: ["orgMembers"],
-    queryFn:  getOrgMembers,
-    staleTime: 60_000,
-  });
-  const members = (membersData?.members ?? []).slice(0, 6);
-
-  /* Notifications */
-  const { data: friendRequests, isLoading: loadingNotifs } = useQuery({
-    queryKey: ["friendRequests"],
-    queryFn:  getFriendRequests,
-    staleTime: 30_000,
-  });
-  const incomingReqs  = friendRequests?.incomingReqs ?? [];
-  const acceptedReqs  = friendRequests?.acceptedReqs ?? [];
+  const todayMeetings = dashboardData?.todayMeetings ?? [];
+  const recentFiles = dashboardData?.recentFiles ?? [];
+  const members = dashboardData?.members ?? [];
+  const incomingReqs = dashboardData?.incomingReqs ?? [];
+  const acceptedReqs = dashboardData?.acceptedReqs ?? [];
   const notifications = [
     ...incomingReqs.map((r) => ({ ...r, _ntype: "request"  })),
     ...acceptedReqs.map((r) => ({ ...r, _ntype: "accepted" })),
@@ -177,7 +139,7 @@ const HomePage = () => {
               </Link>
             }
           >
-            {loadingMeetings ? (
+            {showSectionLoaders ? (
               <div className="flex justify-center py-10">
                 <span className="loading loading-spinner loading-sm" />
               </div>
@@ -266,7 +228,7 @@ const HomePage = () => {
               </Link>
             }
           >
-            {loadingFiles ? (
+            {showSectionLoaders ? (
               <div className="flex justify-center py-10">
                 <span className="loading loading-spinner loading-sm" />
               </div>
@@ -308,7 +270,7 @@ const HomePage = () => {
               </Link>
             }
           >
-            {loadingNotifs ? (
+            {showSectionLoaders ? (
               <div className="flex justify-center py-10">
                 <span className="loading loading-spinner loading-sm" />
               </div>
@@ -375,7 +337,7 @@ const HomePage = () => {
               </Link>
             }
           >
-            {loadingMembers ? (
+            {showSectionLoaders ? (
               <div className="flex justify-center py-10">
                 <span className="loading loading-spinner loading-sm" />
               </div>

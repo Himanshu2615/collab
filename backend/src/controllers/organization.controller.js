@@ -1,6 +1,17 @@
 import Organization from "../models/Organization.js";
 import User from "../models/User.js";
-import { upsertStreamUser } from "../lib/stream.js";
+import { ensureStreamChannel, upsertStreamUser } from "../lib/stream.js";
+
+const canAccessChannel = (channel, userId, role) => {
+    if (!channel) return false;
+    if (!channel.isPrivate) return true;
+    if (["admin", "owner"].includes(role)) return true;
+    return (channel.members || []).some((memberId) => memberId.toString() === userId.toString());
+};
+
+const serializeVisibleChannels = (channels = [], userId, role) => (
+    channels.filter((channel) => canAccessChannel(channel, userId, role))
+);
 
 
 /* ─────────────────────────────────────────
@@ -13,9 +24,8 @@ export async function createOrganization(req, res) {
         const { name, description = "" } = req.body;
         if (!name?.trim()) return res.status(400).json({ message: "Organization name is required" });
 
-        // Prevent creating if already in an org
-        const currentUser = await User.findById(req.user._id);
-        if (currentUser.organization) {
+        // req.user is already loaded by middleware — no need to re-fetch
+        if (req.user.organization) {
             return res.status(400).json({ message: "You are already part of an organization" });
         }
 
@@ -81,13 +91,12 @@ export async function joinOrganization(req, res) {
         const { inviteCode } = req.body;
         if (!inviteCode?.trim()) return res.status(400).json({ message: "Invite code is required" });
 
-        const org = await Organization.findOne({ inviteCode: inviteCode.trim().toUpperCase() });
+        const org = await Organization.findOne({ inviteCode: inviteCode.trim().toUpperCase() }).lean();
         if (!org) return res.status(404).json({ message: "Invalid invite code" });
 
-        // Prevent joining if already in an org
-        const currentUser = await User.findById(req.user._id);
-        if (currentUser.organization) {
-            if (currentUser.organization.toString() === org._id.toString()) {
+        // req.user already loaded by middleware — no need for another DB call
+        if (req.user.organization) {
+            if (req.user.organization.toString() === org._id.toString()) {
                 return res.status(400).json({ message: "You are already a member of this organization" });
             }
             return res.status(400).json({ message: "You are already part of another organization" });
@@ -113,7 +122,7 @@ export async function joinOrganization(req, res) {
         }
 
         // Return org data (without sensitive invite code for members)
-        const orgData = org.toObject();
+        const orgData = { ...org };
         delete orgData.inviteCode;
 
         res.status(200).json({ success: true, organization: orgData });
@@ -129,24 +138,27 @@ export async function joinOrganization(req, res) {
 ──────────────────────────────────────────── */
 export async function getMyOrganization(req, res) {
     try {
-        const user = await User.findById(req.user._id).select("organization role");
-        if (!user?.organization) {
+        // req.user already has organization + role from middleware
+        if (!req.user?.organization) {
             return res.status(200).json({ organization: null });
         }
 
-        const org = await Organization.findById(user.organization).populate("owner", "fullName profilePic");
+        // Run org fetch + member count in parallel
+        const [org, memberCount] = await Promise.all([
+            Organization.findById(req.user.organization)
+                .populate("owner", "fullName profilePic")
+                .lean(),
+            User.countDocuments({ organization: req.user.organization }),
+        ]);
         if (!org) return res.status(404).json({ message: "Organization not found" });
-
-        // Compute live member count — avoids drift from a denormalized counter
-        const memberCount = await User.countDocuments({ organization: org._id });
 
         // Only owners/admins see the invite code
         const isAdminOrOwner = org.admins.some((a) => a.toString() === req.user._id.toString());
-        const orgData = org.toObject();
-        if (!isAdminOrOwner) delete orgData.inviteCode;
-        orgData.memberCount = memberCount;
+        if (!isAdminOrOwner) delete org.inviteCode;
+        org.channels = serializeVisibleChannels(org.channels, req.user._id, req.user.role);
+        org.memberCount = memberCount;
 
-        res.status(200).json({ success: true, organization: orgData, role: user.role });
+        res.status(200).json({ success: true, organization: org, role: req.user.role });
     } catch (error) {
         console.error("Error in getMyOrganization:", error);
         res.status(500).json({ message: "Internal Server Error" });
@@ -159,16 +171,16 @@ export async function getMyOrganization(req, res) {
 ──────────────────────────────────────────── */
 export async function regenerateInviteCode(req, res) {
     try {
-        const user = await User.findById(req.user._id).select("organization role");
-        if (!user?.organization) return res.status(404).json({ message: "You are not in an organization" });
-        if (!["admin", "owner"].includes(user.role)) return res.status(403).json({ message: "Admins only" });
+        // req.user already has organization + role from middleware
+        if (!req.user?.organization) return res.status(404).json({ message: "You are not in an organization" });
+        if (!["admin", "owner"].includes(req.user.role)) return res.status(403).json({ message: "Admins only" });
 
         const newCode = Organization.generateInviteCode();
         const org = await Organization.findByIdAndUpdate(
-            user.organization,
+            req.user.organization,
             { inviteCode: newCode },
             { new: true }
-        );
+        ).lean();
 
         res.status(200).json({ success: true, inviteCode: org.inviteCode });
     } catch (error) {
@@ -183,23 +195,62 @@ export async function regenerateInviteCode(req, res) {
 ──────────────────────────────────────────── */
 export async function createChannel(req, res) {
     try {
-        const user = await User.findById(req.user._id).select("organization role");
-        if (!user?.organization) return res.status(400).json({ message: "You are not in an organization" });
-        if (!["admin", "owner"].includes(user.role)) return res.status(403).json({ message: "Admins only" });
+        // req.user already has organization + role from middleware
+        if (!req.user?.organization) return res.status(400).json({ message: "You are not in an organization" });
+        if (!["admin", "owner"].includes(req.user.role)) return res.status(403).json({ message: "Admins only" });
 
-        const { name, description = "" } = req.body;
+        const { name, description = "", memberIds = [] } = req.body;
         if (!name?.trim()) return res.status(400).json({ message: "Channel name is required" });
 
         const cleanName = name.trim().toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+        const uniqueMemberIds = [...new Set((Array.isArray(memberIds) ? memberIds : []).map(String))];
+        const isPrivate = uniqueMemberIds.length > 0;
 
-        const org = await Organization.findById(user.organization);
+        const org = await Organization.findById(req.user.organization);
+        if (!org) return res.status(404).json({ message: "Organization not found" });
         const exists = org.channels.some((c) => c.name === cleanName);
         if (exists) return res.status(400).json({ message: "A channel with that name already exists" });
 
-        org.channels.push({ name: cleanName, description, isDefault: false });
+        if (uniqueMemberIds.length > 0) {
+            const validMembers = await User.find({
+                _id: { $in: uniqueMemberIds },
+                organization: req.user.organization,
+                isOnboarded: true,
+            }).select("_id").lean();
+
+            if (validMembers.length !== uniqueMemberIds.length) {
+                return res.status(400).json({ message: "Some selected members are invalid for this organization" });
+            }
+        }
+
+        const channelMemberIds = isPrivate
+            ? [...new Set([req.user._id.toString(), ...uniqueMemberIds])]
+            : [];
+
+        org.channels.push({
+            name: cleanName,
+            description,
+            isPrivate,
+            members: channelMemberIds,
+            isDefault: false,
+        });
         await org.save();
 
-        res.status(201).json({ success: true, channels: org.channels });
+        const channelId = `org-${org.slug}-${cleanName}`;
+        await ensureStreamChannel({
+            channelId,
+            channelName: cleanName,
+            orgSlug: org.slug,
+            userId: req.user._id.toString(),
+            memberIds: channelMemberIds,
+            description,
+            isPrivate,
+        });
+
+        res.status(201).json({
+            success: true,
+            channels: serializeVisibleChannels(org.channels, req.user._id, req.user.role),
+        });
     } catch (error) {
         console.error("Error in createChannel:", error);
         res.status(500).json({ message: "Internal Server Error" });
@@ -212,11 +263,11 @@ export async function createChannel(req, res) {
 ──────────────────────────────────────────── */
 export async function deleteChannel(req, res) {
     try {
-        const user = await User.findById(req.user._id).select("organization role");
-        if (!user?.organization) return res.status(400).json({ message: "Not in an organization" });
-        if (!["admin", "owner"].includes(user.role)) return res.status(403).json({ message: "Admins only" });
+        // req.user already has organization + role from middleware
+        if (!req.user?.organization) return res.status(400).json({ message: "Not in an organization" });
+        if (!["admin", "owner"].includes(req.user.role)) return res.status(403).json({ message: "Admins only" });
 
-        const org = await Organization.findById(user.organization);
+        const org = await Organization.findById(req.user.organization);
         const channel = org.channels.id(req.params.channelId);
         if (!channel) return res.status(404).json({ message: "Channel not found" });
         if (channel.isDefault) return res.status(400).json({ message: "Cannot delete default channels" });
@@ -237,10 +288,10 @@ export async function deleteChannel(req, res) {
 ──────────────────────────────────────────── */
 export async function getOrgMembers(req, res) {
     try {
-        const user = await User.findById(req.user._id).select("organization");
-        if (!user?.organization) return res.status(400).json({ message: "Not in an organization" });
+        // req.user already has organization from middleware
+        if (!req.user?.organization) return res.status(400).json({ message: "Not in an organization" });
 
-        const members = await User.find({ organization: user.organization, isOnboarded: true })
+        const members = await User.find({ organization: req.user.organization, isOnboarded: true })
             .select("fullName profilePic nativeLanguage learningLanguage location role bio")
             .lean();
 

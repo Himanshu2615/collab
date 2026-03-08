@@ -10,7 +10,8 @@ export const getFiles = async (req, res) => {
 
         const files = await File.find({ organization: organizationId })
             .populate("sharedBy", "fullName profilePic")
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean();
 
         res.status(200).json(files);
     } catch (error) {

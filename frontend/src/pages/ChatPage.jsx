@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import "stream-chat-react/dist/css/v2/index.css";
 import { useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";

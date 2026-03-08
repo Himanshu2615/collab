@@ -41,6 +41,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
         }
 
         const needsVideo = callType === 'video';
+
         const media = await navigator.mediaDevices.getUserMedia({
           audio: selectedMicId ? { deviceId: { exact: selectedMicId } } : true,
           video: needsVideo
@@ -372,7 +373,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                         ))}
                       </select>
                     </label>
-                    {callType === 'video' && (
+                    {callType === 'video' && videoDevices.length > 0 && (
                       <label className="form-control w-full">
                         <span className="label-text text-xs text-base-content/60 mb-1">Camera</span>
                         <select

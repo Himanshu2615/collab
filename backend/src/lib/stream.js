@@ -41,13 +41,32 @@ export const generateStreamToken = (userId) => {
  * Ensure a Stream team channel exists and the given user is a member.
  * Uses the server-side admin client so no client-side permission issues.
  */
-export const ensureStreamChannel = async ({ channelId, channelName, orgSlug, userId }) => {
+export const ensureStreamChannel = async ({ channelId, channelName, orgSlug, userId, memberIds = [], description = "", isPrivate = false }) => {
+  const uniqueMemberIds = [...new Set([userId, ...memberIds.map(String)])];
   const channel = streamClient.channel("team", channelId, {
     name: `#${channelName}`,
+    description,
     team: orgSlug,
     created_by_id: userId,
+    members: uniqueMemberIds,
+    isPrivate,
   });
-  await channel.create();
-  await channel.addMembers([userId]);
+
+  try {
+    await channel.create();
+  } catch (error) {
+    const code = error?.code || error?.response?.data?.code;
+    if (code !== 4) throw error;
+  }
+
+  if (uniqueMemberIds.length) {
+    try {
+      await channel.addMembers(uniqueMemberIds);
+    } catch (error) {
+      const code = error?.code || error?.response?.data?.code;
+      if (code !== 17) throw error;
+    }
+  }
+
   return channel;
 };

@@ -3,6 +3,7 @@ import useAuthUser from "../hooks/useAuthUser";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { completeOnboarding } from "../lib/api";
+import { setCachedAuthUser } from "../lib/authCache";
 import {
   LoaderIcon,
   MapPinIcon,
@@ -81,9 +82,10 @@ const OnboardingPage = () => {
   /* Mutations */
   const { mutate: onboardingMutation, isPending } = useMutation({
     mutationFn: completeOnboarding,
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast.success("Welcome to Collab! 🎉");
-      queryClient.invalidateQueries({ queryKey: ["authUser"] });
+      setCachedAuthUser(data);
+      queryClient.setQueryData(["authUser"], data);
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Something went wrong");

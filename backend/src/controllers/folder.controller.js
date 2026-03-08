@@ -9,7 +9,8 @@ export const getFolders = async (req, res) => {
 
     const folders = await Folder.find({ organization: organizationId })
       .populate("createdBy", "fullName profilePic")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     res.status(200).json(folders);
   } catch (error) {

@@ -3,6 +3,7 @@ import { useRef, useState, useEffect } from "react";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
 import { getFriendRequests } from "../lib/api";
+import useDashboardSummary from "../hooks/useDashboardSummary";
 import { BellIcon, LogOutIcon, SearchIcon, SettingsIcon, UserIcon } from "lucide-react";
 import ThemeSelector from "./ThemeSelector";
 import useLogout from "../hooks/useLogout";
@@ -26,14 +27,17 @@ const Navbar = () => {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  /* Real unread count from friend-requests query */
+  const { data: dashboardData } = useDashboardSummary();
+
   const { data: friendRequestsData } = useQuery({
     queryKey: ["friendRequests"],
     queryFn: getFriendRequests,
-    enabled: !!authUser,
+    enabled: !!authUser && !dashboardData,
     staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
-  const incomingCount = friendRequestsData?.incomingReqs?.length ?? 0;
+
+  const incomingCount = dashboardData?.incomingReqs?.length ?? friendRequestsData?.incomingReqs?.length ?? 0;
 
   const handleSearchKey = (e) => {
     if (e.key === "Enter" && e.target.value.trim()) {

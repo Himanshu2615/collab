@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { updateProfile } from "../lib/api";
+import { setCachedAuthUser } from "../lib/authCache";
 import useAuthUser from "../hooks/useAuthUser";
 import {
     CameraIcon, SaveIcon, LoaderIcon, UserIcon,
@@ -56,6 +57,7 @@ const ProfilePage = () => {
         mutationFn: updateProfile,
         onSuccess: (data) => {
             toast.success("Profile updated!");
+            setCachedAuthUser({ success: true, user: data.user });
             queryClient.setQueryData(["authUser"], (old) =>
                 old ? { ...old, user: data.user } : old
             );

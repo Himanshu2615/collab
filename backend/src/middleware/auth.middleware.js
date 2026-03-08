@@ -12,11 +12,15 @@ export const protectRoute = async (req, res, next) => {
     // ✅ FIXED: use JWT_SECRET (not JWT_SECRET_KEY)
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.userId).select("-password");
+    // .lean() returns a plain JS object — ~5x faster than hydrating a
+    // full Mongoose document — and this middleware runs on EVERY request.
+    const user = await User.findById(decoded.userId).select("-password").lean();
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
+    // Normalise _id to string so controllers can use req.user._id or req.user.id
+    user.id = user._id.toString();
     req.user = user;
     next();
   } catch (error) {
