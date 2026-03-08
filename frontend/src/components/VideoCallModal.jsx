@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { StreamVideoClient, StreamCall, StreamVideo, SpeakerLayout, useCallStateHooks } from '@stream-io/video-react-sdk';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { OwnCapability, StreamVideoClient, StreamCall, StreamVideo, SpeakerLayout, useCallStateHooks, useToggleCallRecording } from '@stream-io/video-react-sdk';
 import {
   DownloadIcon,
   InfoIcon,
@@ -35,6 +35,25 @@ const WHITEBOARD_EDGE_PADDING = 180;
 const createEventId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+
+const cloneStrokes = (strokes = []) =>
+  strokes.map((stroke) => ({
+    ...stroke,
+    points: (stroke.points || []).map((point) => ({ ...point })),
+  }));
+
+const mergeUniqueStrokes = (...strokeGroups) => {
+  const seen = new Set();
+  const merged = [];
+
+  strokeGroups.flat().forEach((stroke) => {
+    if (!stroke?.id || seen.has(stroke.id)) return;
+    seen.add(stroke.id);
+    merged.push(stroke);
+  });
+
+  return merged;
+};
 
 const pointsToSvgPath = (points = []) => {
   if (!points.length) return '';
@@ -82,6 +101,59 @@ const InCallScreenShareButton = () => {
   );
 };
 
+const InCallRecordingButton = ({ onStateChange }) => {
+  const { useOwnCapabilities } = useCallStateHooks();
+  const ownCapabilities = useOwnCapabilities() || [];
+  const { toggleCallRecording, isAwaitingResponse, isCallRecordingInProgress } = useToggleCallRecording();
+
+  const canStartRecording = ownCapabilities.includes(OwnCapability.START_RECORD_CALL);
+  const canStopRecording = ownCapabilities.includes(OwnCapability.STOP_RECORD_CALL);
+  const canRecord = canStartRecording || canStopRecording;
+
+  useEffect(() => {
+    onStateChange?.({
+      inProgress: isCallRecordingInProgress,
+      pending: isAwaitingResponse,
+      canRecord,
+    });
+  }, [canRecord, isAwaitingResponse, isCallRecordingInProgress, onStateChange]);
+
+  const handleToggle = async () => {
+    if (!canRecord || isAwaitingResponse) return;
+
+    try {
+      await toggleCallRecording();
+    } catch (error) {
+      console.error('Recording error:', error);
+      toast.error(`Recording failed: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  if (!canRecord) {
+    return (
+      <button
+        disabled
+        className="btn btn-sm gap-2 btn-disabled"
+        title="Recording is not enabled for this call or your role"
+      >
+        <RadioIcon className="size-4" /> Recording unavailable
+      </button>
+    );
+  }
+
+  return (
+    <button
+      onClick={handleToggle}
+      disabled={isAwaitingResponse}
+      className={`btn btn-sm gap-2 ${isCallRecordingInProgress ? 'btn-error' : 'btn-outline border-white/20 text-white hover:bg-white/10'} ${isAwaitingResponse ? 'btn-disabled' : ''}`}
+      title={isAwaitingResponse ? (isCallRecordingInProgress ? 'Waiting for recording to stop...' : 'Waiting for recording to start...') : isCallRecordingInProgress ? 'Stop recording' : 'Record call'}
+    >
+      <RadioIcon className={`size-4 ${isCallRecordingInProgress ? 'animate-pulse' : ''}`} />
+      {isAwaitingResponse ? (isCallRecordingInProgress ? 'Stopping…' : 'Starting…') : isCallRecordingInProgress ? 'Stop recording' : 'Record'}
+    </button>
+  );
+};
+
 const VideoCallModal = ({
   isOpen,
   onClose,
@@ -97,6 +169,8 @@ const VideoCallModal = ({
   const [client, setClient] = useState(null);
   const [call, setCall] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingPending, setIsRecordingPending] = useState(false);
+  const [canRecord, setCanRecord] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isCamEnabled, setIsCamEnabled] = useState(callType === 'video');
@@ -114,6 +188,9 @@ const VideoCallModal = ({
   const [activeSidebarTab, setActiveSidebarTab] = useState('chat');
   const [activeStageTab, setActiveStageTab] = useState('meeting');
   const [isWhiteboardShared, setIsWhiteboardShared] = useState(false);
+  const [sharedWhiteboardOwnerId, setSharedWhiteboardOwnerId] = useState('');
+  const [sharedWhiteboardOwnerName, setSharedWhiteboardOwnerName] = useState('');
+  const [isSharedWhiteboardCollaborative, setIsSharedWhiteboardCollaborative] = useState(false);
   const [showWhiteboardPopup, setShowWhiteboardPopup] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
@@ -171,6 +248,9 @@ const VideoCallModal = ({
       setActiveSidebarTab('chat');
       setActiveStageTab('meeting');
       setIsWhiteboardShared(false);
+      setSharedWhiteboardOwnerId('');
+      setSharedWhiteboardOwnerName('');
+      setIsSharedWhiteboardCollaborative(false);
       setShowWhiteboardPopup(false);
       setBrushColor(WHITEBOARD_COLORS[0]);
       setBrushWidth(3);
@@ -296,6 +376,8 @@ const VideoCallModal = ({
       setCall(null);
       setClient(null);
       setIsRecording(false);
+      setIsRecordingPending(false);
+      setCanRecord(false);
       setIsJoining(false);
       setIsInCallMicEnabled(true);
       setIsInCallCamEnabled(callType === 'video');
@@ -371,17 +453,43 @@ const VideoCallModal = ({
         const stroke = custom.stroke;
         if (!stroke || stroke.userId === user?._id) return;
         appendWhiteboardStroke(stroke);
+        if (custom.ownerId && custom.ownerId === user?._id) {
+          appendPersonalWhiteboardStroke(stroke);
+        }
       }
 
       if (custom.type === WHITEBOARD_CLEAR_EVENT && custom.userId !== user?._id) {
         setWhiteboardStrokes([]);
         setDraftStroke(null);
         draftStrokeRef.current = null;
+        setBoardSize(WHITEBOARD_INITIAL_SIZE);
+        if (custom.ownerId && custom.ownerId === user?._id) {
+          setPersonalWhiteboardStrokes([]);
+          setPersonalDraftStroke(null);
+          personalDraftStrokeRef.current = null;
+          setPersonalBoardSize(WHITEBOARD_INITIAL_SIZE);
+        }
       }
 
       if (custom.type === WHITEBOARD_VISIBILITY_EVENT) {
         const shouldShowWhiteboard = Boolean(custom.shared);
         setIsWhiteboardShared(shouldShowWhiteboard);
+        setSharedWhiteboardOwnerId(custom.ownerId || '');
+        setSharedWhiteboardOwnerName(custom.ownerName || '');
+        setIsSharedWhiteboardCollaborative(Boolean(custom.collaborative));
+
+        if (shouldShowWhiteboard && Array.isArray(custom.strokes)) {
+          const snapshot = cloneStrokes(custom.strokes);
+          const nextSize = custom.boardSize || WHITEBOARD_INITIAL_SIZE;
+          setWhiteboardStrokes(snapshot);
+          setBoardSize(nextSize);
+
+          if (custom.ownerId === user?._id) {
+            setPersonalWhiteboardStrokes(snapshot);
+            setPersonalBoardSize(nextSize);
+          }
+        }
+
         if (shouldShowWhiteboard) {
           setActiveStageTab('whiteboard');
         } else {
@@ -504,26 +612,35 @@ const VideoCallModal = ({
     }
   };
 
-  const toggleRecording = async () => {
-    const activeCall = callRef.current || call;
-    if (!activeCall) return;
+  const handleRecordingStateChange = useCallback((state) => {
+    setIsRecording(Boolean(state?.inProgress));
+    setIsRecordingPending(Boolean(state?.pending));
+    setCanRecord(Boolean(state?.canRecord));
+  }, []);
 
-    try {
-      if (isRecording) {
-        await activeCall.stopRecording();
-        setIsRecording(false);
-        toast.success('Recording stopped');
-        updateCallLog(callId, { recorded: true });
-      } else {
-        await activeCall.startRecording();
-        setIsRecording(true);
-        toast.success('Recording started');
-      }
-    } catch (error) {
-      console.error('Recording error:', error);
-      toast.error('Recording failed: ' + error.message);
+  useEffect(() => {
+    const logs = JSON.parse(localStorage.getItem('callLogs') || '[]');
+    const index = logs.findIndex((log) => log.callId === callId);
+    if (index === -1) return;
+
+    const current = logs[index];
+    const next = { ...current };
+
+    if (canRecord !== undefined) {
+      next.canRecord = canRecord;
     }
-  };
+
+    if (isRecording) {
+      next.recorded = true;
+      next.recordingStartedAt = next.recordingStartedAt || new Date().toISOString();
+      delete next.recordingEndedAt;
+    } else if (current.recordingStartedAt && !current.recordingEndedAt) {
+      next.recordingEndedAt = new Date().toISOString();
+    }
+
+    logs[index] = next;
+    localStorage.setItem('callLogs', JSON.stringify(logs));
+  }, [callId, canRecord, isRecording]);
 
   const toggleInCallMicrophone = async () => {
     const activeCall = callRef.current || call;
@@ -609,6 +726,11 @@ const VideoCallModal = ({
   };
 
   const startDrawing = (event) => {
+    if (!isPersonalWhiteboardOpen && isWhiteboardShared && !canEditSharedWhiteboard) {
+      toast.error('This shared whiteboard is view only.');
+      return;
+    }
+
     const point = getBoardPoint(event);
     if (!point) return;
 
@@ -680,9 +802,16 @@ const VideoCallModal = ({
     }
 
     appendWhiteboardStroke(stroke);
+    if (isSharedBoardOwner) {
+      appendPersonalWhiteboardStroke(stroke);
+    }
 
     try {
-      await sendCustomCallEvent({ type: WHITEBOARD_STROKE_EVENT, stroke });
+      await sendCustomCallEvent({
+        type: WHITEBOARD_STROKE_EVENT,
+        stroke,
+        ownerId: sharedWhiteboardOwnerId || user._id,
+      });
     } catch (error) {
       console.error('Whiteboard sync error:', error);
       toast.error('Failed to sync whiteboard stroke');
@@ -702,23 +831,52 @@ const VideoCallModal = ({
     setWhiteboardStrokes([]);
     updateDraftStroke(null);
     setBoardSize(WHITEBOARD_INITIAL_SIZE);
+    if (sharedWhiteboardOwnerId === user?._id) {
+      setPersonalWhiteboardStrokes([]);
+      updatePersonalDraftStroke(null);
+      setPersonalBoardSize(WHITEBOARD_INITIAL_SIZE);
+    }
     try {
-      await sendCustomCallEvent({ type: WHITEBOARD_CLEAR_EVENT, userId: user._id });
+      await sendCustomCallEvent({
+        type: WHITEBOARD_CLEAR_EVENT,
+        userId: user._id,
+        ownerId: sharedWhiteboardOwnerId || user._id,
+      });
     } catch (error) {
       console.error('Whiteboard clear sync error:', error);
       toast.error('Failed to sync whiteboard clear');
     }
   };
 
+  const broadcastWhiteboardShareState = async ({ shared, collaborative, strokes, size }) => {
+    await sendCustomCallEvent({
+      type: WHITEBOARD_VISIBILITY_EVENT,
+      shared,
+      ownerId: shared ? user._id : '',
+      ownerName: shared ? user.fullName : '',
+      collaborative: shared ? collaborative : false,
+      strokes: shared ? cloneStrokes(strokes) : [],
+      boardSize: shared ? size : WHITEBOARD_INITIAL_SIZE,
+      userId: user._id,
+    });
+  };
+
   const shareWhiteboard = async () => {
+    const snapshot = cloneStrokes(personalWhiteboardStrokes);
+    const snapshotSize = personalBoardSize;
     setIsWhiteboardShared(true);
+    setSharedWhiteboardOwnerId(user._id);
+    setSharedWhiteboardOwnerName(user.fullName);
     setActiveStageTab('whiteboard');
+    setWhiteboardStrokes(snapshot);
+    setBoardSize(snapshotSize);
 
     try {
-      await sendCustomCallEvent({
-        type: WHITEBOARD_VISIBILITY_EVENT,
+      await broadcastWhiteboardShareState({
         shared: true,
-        userId: user._id,
+        collaborative: isSharedWhiteboardCollaborative,
+        strokes: snapshot,
+        size: snapshotSize,
       });
       toast.success('Whiteboard shared with the meeting');
     } catch (error) {
@@ -729,13 +887,17 @@ const VideoCallModal = ({
 
   const stopWhiteboardShare = async () => {
     setIsWhiteboardShared(false);
+    setSharedWhiteboardOwnerId('');
+    setSharedWhiteboardOwnerName('');
+    setIsSharedWhiteboardCollaborative(false);
     setActiveStageTab((current) => (current === 'whiteboard' ? 'meeting' : current));
 
     try {
-      await sendCustomCallEvent({
-        type: WHITEBOARD_VISIBILITY_EVENT,
+      await broadcastWhiteboardShareState({
         shared: false,
-        userId: user._id,
+        collaborative: false,
+        strokes: [],
+        size: WHITEBOARD_INITIAL_SIZE,
       });
       toast.success('Whiteboard hidden from the meeting');
     } catch (error) {
@@ -744,18 +906,41 @@ const VideoCallModal = ({
     }
   };
 
+  const toggleSharedWhiteboardCollaboration = async () => {
+    const nextCollaborative = !isSharedWhiteboardCollaborative;
+    setIsSharedWhiteboardCollaborative(nextCollaborative);
+
+    try {
+      await broadcastWhiteboardShareState({
+        shared: true,
+        collaborative: nextCollaborative,
+        strokes: whiteboardStrokes,
+        size: boardSize,
+      });
+      toast.success(nextCollaborative ? 'Participants can now draw on your whiteboard' : 'Your whiteboard is now view only for others');
+    } catch (error) {
+      console.error('Whiteboard collaboration sync error:', error);
+      setIsSharedWhiteboardCollaborative((current) => !current);
+      toast.error('Failed to update whiteboard permissions');
+    }
+  };
+
   const renderedStrokes = useMemo(
-    () => (draftStroke ? [...whiteboardStrokes, draftStroke] : whiteboardStrokes),
+    () => mergeUniqueStrokes(whiteboardStrokes, draftStroke ? [draftStroke] : []),
     [draftStroke, whiteboardStrokes]
   );
   const personalRenderedStrokes = useMemo(
-    () => (personalDraftStroke ? [...personalWhiteboardStrokes, personalDraftStroke] : personalWhiteboardStrokes),
+    () => mergeUniqueStrokes(personalWhiteboardStrokes, personalDraftStroke ? [personalDraftStroke] : []),
     [personalDraftStroke, personalWhiteboardStrokes]
   );
+  const isSharedBoardOwner = isWhiteboardShared && sharedWhiteboardOwnerId === user?._id;
+  const canEditSharedWhiteboard = isSharedBoardOwner || isSharedWhiteboardCollaborative;
 
-  const popupBoardTitle = isWhiteboardShared ? 'Collaborative whiteboard' : 'Personal whiteboard';
+  const popupBoardTitle = isWhiteboardShared
+    ? `${isSharedBoardOwner ? 'Your' : `${sharedWhiteboardOwnerName || 'Participant'}'s`} shared whiteboard`
+    : 'Personal whiteboard';
   const popupBoardDescription = isWhiteboardShared
-    ? 'Draw, scroll, and expand the board as your discussion grows.'
+    ? `Draw, scroll, and expand ${isSharedBoardOwner ? 'your' : `${sharedWhiteboardOwnerName || 'the participant'}'s`} board as the discussion grows.`
     : 'Sketch privately, capture ideas, and keep notes without sharing them to the meeting.';
   const activeRenderedStrokes = isPersonalWhiteboardOpen ? personalRenderedStrokes : renderedStrokes;
 
@@ -807,6 +992,50 @@ const VideoCallModal = ({
     }));
   }, [participantIds, participantNames, participantProfiles, user?._id, user?.fullName, user?.profilePic]);
 
+  const participantImageLookup = useMemo(() => {
+    const lookup = new Map();
+
+    meetingRoster.forEach((member) => {
+      if (!member) return;
+      if (member.id) lookup.set(member.id, member.image || '');
+      if (member.name) lookup.set(member.name, member.image || '');
+    });
+
+    if (user?._id) lookup.set(user._id, user.profilePic || '');
+    if (user?.fullName) lookup.set(user.fullName, user.profilePic || '');
+
+    return lookup;
+  }, [meetingRoster, user?._id, user?.fullName, user?.profilePic]);
+
+  const CallVideoPlaceholder = useMemo(
+    () =>
+      forwardRef(function CallVideoPlaceholder({ participant, style, className = '', ...rest }, ref) {
+        const displayName = participant?.name || participant?.userId || 'Participant';
+        const displayImage = participant?.image || participantImageLookup.get(participant?.userId) || participantImageLookup.get(displayName) || '';
+
+        return (
+          <div
+            ref={ref}
+            style={style}
+            className={`flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.18),transparent_42%),linear-gradient(180deg,#0f172a_0%,#111827_100%)] p-6 ${className}`}
+            {...rest}
+          >
+            <div className="flex flex-col items-center text-center text-white">
+              <Avatar
+                src={displayImage}
+                name={displayName}
+                size="w-24 h-24 sm:w-28 sm:h-28"
+                className="ring-4 ring-white/10 shadow-2xl"
+              />
+              <p className="mt-4 text-base font-semibold sm:text-lg">{displayName}</p>
+              <p className="mt-1 text-xs text-white/65 sm:text-sm">Camera is off</p>
+            </div>
+          </div>
+        );
+      }),
+    [participantImageLookup]
+  );
+
   if (!isOpen) return null;
 
   return (
@@ -832,6 +1061,16 @@ const VideoCallModal = ({
                       <span className="truncate">{workspaceLabel}</span>
                       <span className="text-base-content/25">|</span>
                       <span className="truncate text-base-content/55">{sessionLabel}</span>
+                      {isRecording && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-error/10 px-2.5 py-1 text-[11px] font-semibold text-error">
+                          <span className="inline-flex size-2 rounded-full bg-error animate-pulse" /> Recording live
+                        </span>
+                      )}
+                      {!canRecord && call && (
+                        <span className="inline-flex items-center rounded-full bg-base-200 px-2.5 py-1 text-[11px] font-semibold text-base-content/55">
+                          Recording unavailable
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -858,42 +1097,57 @@ const VideoCallModal = ({
                         >
                           <PenToolIcon className="size-4" /> {isWhiteboardShared ? 'Shared Whiteboard' : 'Whiteboard on demand'}
                         </button>
+                        {isWhiteboardShared && (
+                          <span className="rounded-full bg-base-200 px-3 py-1 text-xs font-semibold text-base-content/65">
+                            Shared by {isSharedBoardOwner ? 'you' : sharedWhiteboardOwnerName || 'participant'}
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {isWhiteboardShared ? (
+                        {isWhiteboardShared && isSharedBoardOwner ? (
+                          <button onClick={toggleSharedWhiteboardCollaboration} className={`btn btn-sm gap-2 ${isSharedWhiteboardCollaborative ? 'btn-secondary' : 'btn-ghost'}`}>
+                            <PenToolIcon className="size-4" /> {isSharedWhiteboardCollaborative ? 'Others can edit' : 'View only for others'}
+                          </button>
+                        ) : null}
+
+                        {isWhiteboardShared && isSharedBoardOwner ? (
                           <button onClick={stopWhiteboardShare} className="btn btn-ghost btn-sm gap-2 text-error">
                             <PenToolIcon className="size-4" /> Stop whiteboard
                           </button>
-                        ) : (
+                        ) : !isWhiteboardShared ? (
                           <button onClick={shareWhiteboard} className="btn btn-primary btn-sm gap-2">
                             <PenToolIcon className="size-4" /> Share whiteboard
                           </button>
-                        )}
+                        ) : null}
 
                         {isWhiteboardShared && activeStageTab === 'whiteboard' && (
                           <>
-                            <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm btn-square" title="Clear whiteboard">
-                              <Trash2Icon className="size-4" />
-                            </button>
+                            {isSharedBoardOwner && (
+                              <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm btn-square" title="Clear whiteboard">
+                                <Trash2Icon className="size-4" />
+                              </button>
+                            )}
                             <button onClick={() => setShowWhiteboardPopup(true)} className="btn btn-ghost btn-sm btn-square" title="Open whiteboard popup">
                               <MonitorUpIcon className="size-4" />
                             </button>
-                            <button
-                              onClick={() => {
-                                const blob = new Blob([JSON.stringify(whiteboardStrokes, null, 2)], { type: 'application/json' });
-                                const url = URL.createObjectURL(blob);
-                                const link = document.createElement('a');
-                                link.href = url;
-                                link.download = `whiteboard-${callId}.json`;
-                                link.click();
-                                URL.revokeObjectURL(url);
-                              }}
-                              className="btn btn-ghost btn-sm btn-square"
-                              title="Export whiteboard"
-                            >
-                              <DownloadIcon className="size-4" />
-                            </button>
+                            {isSharedBoardOwner && (
+                              <button
+                                onClick={() => {
+                                  const blob = new Blob([JSON.stringify(whiteboardStrokes, null, 2)], { type: 'application/json' });
+                                  const url = URL.createObjectURL(blob);
+                                  const link = document.createElement('a');
+                                  link.href = url;
+                                  link.download = `whiteboard-${callId}.json`;
+                                  link.click();
+                                  URL.revokeObjectURL(url);
+                                }}
+                                className="btn btn-ghost btn-sm btn-square"
+                                title="Export whiteboard"
+                              >
+                                <DownloadIcon className="size-4" />
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -913,7 +1167,7 @@ const VideoCallModal = ({
                           <div ref={whiteboardScrollRef} className="h-full overflow-auto bg-[#fbfcff] p-4">
                             <div
                               ref={whiteboardRef}
-                              className="relative rounded-[28px] border border-base-300 bg-white shadow-inner touch-none"
+                              className={`relative rounded-[28px] border border-base-300 bg-white shadow-inner touch-none ${canEditSharedWhiteboard ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
                               style={{ width: `${boardSize.width}px`, height: `${boardSize.height}px` }}
                               onPointerDown={startDrawing}
                               onPointerMove={continueDrawing}
@@ -955,15 +1209,15 @@ const VideoCallModal = ({
                       ) : (
                         <div className="relative h-full overflow-hidden bg-slate-950">
                           <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs font-medium text-white/80 backdrop-blur-md">
-                            Normal meeting view{isWhiteboardShared ? ' • Whiteboard ready when needed' : ' • Share a whiteboard or screen when you need it'}
+                            Normal meeting view{isWhiteboardShared ? ` • ${isSharedBoardOwner ? 'Your' : `${sharedWhiteboardOwnerName || 'A participant\'s'}`} whiteboard is ready` : ' • Share a whiteboard or screen when you need it'}
                           </div>
-                          <SpeakerLayout />
+                          <SpeakerLayout VideoPlaceholder={CallVideoPlaceholder} />
                         </div>
                       )}
 
                       {isWhiteboardShared && activeStageTab === 'whiteboard' && callType === 'video' && (
                         <div className="absolute bottom-4 right-4 h-24 w-40 overflow-hidden rounded-2xl border border-white/15 bg-slate-950 shadow-xl">
-                          <SpeakerLayout />
+                          <SpeakerLayout VideoPlaceholder={CallVideoPlaceholder} />
                         </div>
                       )}
                     </div>
@@ -988,13 +1242,7 @@ const VideoCallModal = ({
                           </button>
                         )}
 
-                        <button
-                          onClick={toggleRecording}
-                          className={`btn btn-sm gap-2 ${isRecording ? 'btn-error' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
-                        >
-                          <RadioIcon className={`size-4 ${isRecording ? 'animate-pulse' : ''}`} />
-                          {isRecording ? 'Stop recording' : 'Record'}
-                        </button>
+                        <InCallRecordingButton onStateChange={handleRecordingStateChange} />
 
                         <button
                           onClick={() => {
@@ -1172,12 +1420,24 @@ const VideoCallModal = ({
                           ))}
                         </select>
 
-                        <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm gap-2 text-error">
-                          <Trash2Icon className="size-4" /> Clear
-                        </button>
+                        {isWhiteboardShared && isSharedBoardOwner && (
+                          <button onClick={toggleSharedWhiteboardCollaboration} className={`btn btn-sm gap-2 ${isSharedWhiteboardCollaborative ? 'btn-secondary' : 'btn-ghost'}`}>
+                            <PenToolIcon className="size-4" /> {isSharedWhiteboardCollaborative ? 'Others can edit' : 'View only for others'}
+                          </button>
+                        )}
+                        {(!isWhiteboardShared || isSharedBoardOwner) && (
+                          <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm gap-2 text-error">
+                            <Trash2Icon className="size-4" /> Clear
+                          </button>
+                        )}
                         {!isWhiteboardShared && (
                           <button onClick={shareWhiteboard} className="btn btn-primary btn-sm gap-2">
                             <PenToolIcon className="size-4" /> Share to meeting
+                          </button>
+                        )}
+                        {isWhiteboardShared && isSharedBoardOwner && (
+                          <button onClick={stopWhiteboardShare} className="btn btn-ghost btn-sm gap-2 text-error">
+                            <PenToolIcon className="size-4" /> Stop sharing
                           </button>
                         )}
                         <button onClick={() => setShowWhiteboardPopup(false)} className="btn btn-primary btn-sm gap-2">
@@ -1192,10 +1452,18 @@ const VideoCallModal = ({
                         : 'Your personal board stays private until you decide to share it with the meeting.'}
                     </div>
 
+                    {isWhiteboardShared && (
+                      <div className="border-b border-base-200 px-4 py-3 text-sm text-base-content/60 sm:px-5">
+                        {isSharedBoardOwner
+                          ? (isSharedWhiteboardCollaborative ? 'Participants can draw on your shared whiteboard.' : 'Others can view your shared whiteboard, but only you can edit it.')
+                          : (isSharedWhiteboardCollaborative ? `${sharedWhiteboardOwnerName || 'The owner'} allows participants to draw on this whiteboard.` : `${sharedWhiteboardOwnerName || 'The owner'} shared this whiteboard in view-only mode.`)}
+                      </div>
+                    )}
+
                     <div ref={whiteboardScrollRef} className="min-h-0 flex-1 overflow-auto bg-base-200/60 p-4 sm:p-6">
                       <div
                         ref={whiteboardRef}
-                        className="relative rounded-3xl border border-base-300 bg-white shadow-inner touch-none"
+                        className={`relative rounded-3xl border border-base-300 bg-white shadow-inner touch-none ${isPersonalWhiteboardOpen || canEditSharedWhiteboard ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
                         style={{ width: `${activeBoardSize.width}px`, height: `${activeBoardSize.height}px` }}
                         onPointerDown={startDrawing}
                         onPointerMove={continueDrawing}
@@ -1290,7 +1558,7 @@ const VideoCallModal = ({
                   </div>
                   <div className="rounded-2xl bg-base-200 px-4 py-3">
                     <p className="text-xs uppercase tracking-wide text-base-content/50">Meeting tools</p>
-                    <p className="mt-1 text-sm font-medium text-base-content">Live chat, whiteboard on demand, screen sharing, recording, microphone control, camera control</p>
+                    <p className="mt-1 text-sm font-medium text-base-content">Live chat, whiteboard on demand, screen sharing, synced recording controls, microphone control, camera control</p>
                   </div>
                   <div className="rounded-2xl bg-base-200 px-4 py-3 space-y-3">
                     <p className="text-xs uppercase tracking-wide text-base-content/50">Devices</p>
