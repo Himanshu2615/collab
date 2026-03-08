@@ -21,6 +21,9 @@ const CALL_CHAT_EVENT = 'bizzcolab.call.chat';
 const WHITEBOARD_STROKE_EVENT = 'bizzcolab.call.whiteboard.stroke';
 const WHITEBOARD_CLEAR_EVENT = 'bizzcolab.call.whiteboard.clear';
 const WHITEBOARD_COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f97316', '#ef4444', '#111827'];
+const WHITEBOARD_INITIAL_SIZE = { width: 3200, height: 2200 };
+const WHITEBOARD_EXPAND_STEP = 800;
+const WHITEBOARD_EDGE_PADDING = 180;
 
 const createEventId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -28,7 +31,7 @@ const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 
 const pointsToSvgPath = (points = []) => {
   if (!points.length) return '';
-  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x * 100}% ${point.y * 100}%`).join(' ');
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
 };
 
 const getOrgSlug = (user) => {
@@ -55,7 +58,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const [selectedCameraId, setSelectedCameraId] = useState('');
   const [selectedSpeakerId, setSelectedSpeakerId] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [activePanel, setActivePanel] = useState('chat');
+  const [showWhiteboardPopup, setShowWhiteboardPopup] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [whiteboardStrokes, setWhiteboardStrokes] = useState([]);
@@ -63,11 +66,18 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushColor, setBrushColor] = useState(WHITEBOARD_COLORS[0]);
   const [brushWidth, setBrushWidth] = useState(3);
+  const [boardSize, setBoardSize] = useState(WHITEBOARD_INITIAL_SIZE);
   const callRef = useRef(null);
   const previewVideoRef = useRef(null);
   const whiteboardRef = useRef(null);
+  const whiteboardScrollRef = useRef(null);
   const messagesEndRef = useRef(null);
   const customUnsubscribeRef = useRef(null);
+  const draftStrokeRef = useRef(null);
+
+  useEffect(() => {
+    draftStrokeRef.current = draftStroke;
+  }, [draftStroke]);
 
   useEffect(() => {
     const shouldEnableCamera = callType === 'video';
@@ -82,11 +92,22 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       setWhiteboardStrokes([]);
       setDraftStroke(null);
       setIsSidebarOpen(true);
-      setActivePanel('chat');
+      setShowWhiteboardPopup(false);
       setBrushColor(WHITEBOARD_COLORS[0]);
       setBrushWidth(3);
+      setBoardSize(WHITEBOARD_INITIAL_SIZE);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!showWhiteboardPopup) return;
+    requestAnimationFrame(() => {
+      const el = whiteboardScrollRef.current;
+      if (!el) return;
+      el.scrollLeft = Math.max(0, (boardSize.width - el.clientWidth) / 2);
+      el.scrollTop = Math.max(0, (boardSize.height - el.clientHeight) / 2);
+    });
+  }, [showWhiteboardPopup, boardSize.width, boardSize.height]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -222,7 +243,20 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
   const appendWhiteboardStroke = (stroke) => {
     if (!stroke?.id || !stroke?.points?.length) return;
+    ensureBoardSizeForPoints(stroke.points);
     setWhiteboardStrokes((prev) => (prev.some((item) => item.id === stroke.id) ? prev : [...prev, stroke]));
+  };
+
+  const ensureBoardSizeForPoints = (points = []) => {
+    if (!points.length) return;
+
+    const maxX = Math.max(...points.map((point) => point.x));
+    const maxY = Math.max(...points.map((point) => point.y));
+
+    setBoardSize((prev) => ({
+      width: maxX > prev.width - WHITEBOARD_EDGE_PADDING ? prev.width + WHITEBOARD_EXPAND_STEP : prev.width,
+      height: maxY > prev.height - WHITEBOARD_EDGE_PADDING ? prev.height + WHITEBOARD_EXPAND_STEP : prev.height,
+    }));
   };
 
   const registerCustomEventHandlers = (activeCall) => {
@@ -455,23 +489,23 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     }
   };
 
-  const getNormalizedPoint = (event) => {
+  const getBoardPoint = (event) => {
     const surface = whiteboardRef.current;
     if (!surface) return null;
     const rect = surface.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
 
     return {
-      x: clamp((event.clientX - rect.left) / rect.width),
-      y: clamp((event.clientY - rect.top) / rect.height),
+      x: clamp(event.clientX - rect.left, 0, rect.width),
+      y: clamp(event.clientY - rect.top, 0, rect.height),
     };
   };
 
   const startDrawing = (event) => {
-    if (activePanel !== 'whiteboard') return;
-    const point = getNormalizedPoint(event);
+    const point = getBoardPoint(event);
     if (!point) return;
 
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     setIsDrawing(true);
     setDraftStroke({
       id: createEventId(),
@@ -485,8 +519,10 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
   const continueDrawing = (event) => {
     if (!isDrawing) return;
-    const point = getNormalizedPoint(event);
+    const point = getBoardPoint(event);
     if (!point) return;
+
+    ensureBoardSizeForPoints([point]);
 
     setDraftStroke((prev) => {
       if (!prev) return prev;
@@ -505,15 +541,17 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     if (!isDrawing) return;
     setIsDrawing(false);
 
-    if (!draftStroke?.points?.length) {
+    const stroke = draftStrokeRef.current;
+
+    if (!stroke?.points?.length) {
       setDraftStroke(null);
       return;
     }
 
-    appendWhiteboardStroke(draftStroke);
+    appendWhiteboardStroke(stroke);
 
     try {
-      await sendCustomCallEvent({ type: WHITEBOARD_STROKE_EVENT, stroke: draftStroke });
+      await sendCustomCallEvent({ type: WHITEBOARD_STROKE_EVENT, stroke });
     } catch (error) {
       console.error('Whiteboard sync error:', error);
       toast.error('Failed to sync whiteboard stroke');
@@ -611,21 +649,17 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                         </button>
 
                         <button
-                          onClick={() => {
-                            setIsSidebarOpen(true);
-                            setActivePanel('chat');
-                          }}
-                          className={`btn btn-sm gap-2 ${isSidebarOpen && activePanel === 'chat' ? 'btn-secondary' : 'btn-outline'}`}
+                          onClick={() => setIsSidebarOpen(true)}
+                          className={`btn btn-sm gap-2 ${isSidebarOpen ? 'btn-secondary' : 'btn-outline'}`}
                         >
                           <MessageSquareIcon className="size-4" /> Chat
                         </button>
 
                         <button
                           onClick={() => {
-                            setIsSidebarOpen(true);
-                            setActivePanel('whiteboard');
+                            setShowWhiteboardPopup(true);
                           }}
-                          className={`btn btn-sm gap-2 ${isSidebarOpen && activePanel === 'whiteboard' ? 'btn-secondary' : 'btn-outline'}`}
+                          className={`btn btn-sm gap-2 ${showWhiteboardPopup ? 'btn-secondary' : 'btn-outline'}`}
                         >
                           <PenToolIcon className="size-4" /> Whiteboard
                         </button>
@@ -641,142 +675,147 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                 {isSidebarOpen && (
                   <aside className="flex w-full flex-col border-t border-base-200 bg-base-100 xl:h-full xl:max-w-[380px] xl:border-l xl:border-t-0">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-base-200 px-4 py-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={() => setActivePanel('chat')}
-                          className={`btn btn-sm gap-2 ${activePanel === 'chat' ? 'btn-secondary' : 'btn-ghost'}`}
-                        >
-                          <MessageSquareIcon className="size-4" /> Chat
-                        </button>
-                        <button
-                          onClick={() => setActivePanel('whiteboard')}
-                          className={`btn btn-sm gap-2 ${activePanel === 'whiteboard' ? 'btn-secondary' : 'btn-ghost'}`}
-                        >
-                          <PenToolIcon className="size-4" /> Whiteboard
-                        </button>
+                      <div>
+                        <p className="text-sm font-semibold text-base-content">In-call chat</p>
+                        <p className="text-xs text-base-content/50">Share notes with everyone in the meeting.</p>
                       </div>
                       <button onClick={() => setIsSidebarOpen(false)} className="btn btn-ghost btn-sm btn-circle self-start">
                         <XIcon className="size-4" />
                       </button>
                     </div>
 
-                    {activePanel === 'chat' ? (
-                      <div className="flex min-h-0 flex-1 flex-col">
-                        <div className="max-h-[36vh] flex-1 space-y-3 overflow-y-auto px-4 py-4 xl:max-h-none">
-                          {chatMessages.length === 0 ? (
-                            <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/50 p-6 text-center">
-                              <MessageSquareIcon className="mx-auto mb-3 size-8 text-base-content/25" />
-                              <p className="font-medium text-base-content/70">No messages yet</p>
-                              <p className="mt-1 text-sm text-base-content/50">Share links, notes, or quick decisions during the call.</p>
-                            </div>
-                          ) : (
-                            chatMessages.map((message) => {
-                              const isOwn = message.userId === user._id;
-                              return (
-                                <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                                  <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${isOwn ? 'bg-primary text-primary-content' : 'bg-base-200 text-base-content'}`}>
-                                    <p className={`text-[11px] font-semibold uppercase tracking-wide ${isOwn ? 'text-primary-content/70' : 'text-base-content/45'}`}>
-                                      {isOwn ? 'You' : message.userName}
-                                    </p>
-                                    <p className="mt-1 whitespace-pre-wrap break-words text-sm">{message.text}</p>
-                                  </div>
-                                </div>
-                              );
-                            })
-                          )}
-                          <div ref={messagesEndRef} />
-                        </div>
-
-                        <div className="border-t border-base-200 p-4">
-                          <div className="flex items-end gap-2">
-                            <textarea
-                              value={chatInput}
-                              onChange={(event) => setChatInput(event.target.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter' && !event.shiftKey) {
-                                  event.preventDefault();
-                                  handleSendChatMessage();
-                                }
-                              }}
-                              className="textarea textarea-bordered min-h-[88px] flex-1 resize-none"
-                              placeholder="Type a message for everyone in the call…"
-                            />
-                            <button onClick={handleSendChatMessage} className="btn btn-primary btn-square">
-                              <SendIcon className="size-4" />
-                            </button>
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      <div className="max-h-[36vh] flex-1 space-y-3 overflow-y-auto px-4 py-4 xl:max-h-none">
+                        {chatMessages.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/50 p-6 text-center">
+                            <MessageSquareIcon className="mx-auto mb-3 size-8 text-base-content/25" />
+                            <p className="font-medium text-base-content/70">No messages yet</p>
+                            <p className="mt-1 text-sm text-base-content/50">Share links, notes, or quick decisions during the call.</p>
                           </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex min-h-0 flex-1 flex-col">
-                        <div className="flex flex-wrap items-center gap-2 border-b border-base-200 px-4 py-3">
-                          {WHITEBOARD_COLORS.map((color) => (
-                            <button
-                              key={color}
-                              onClick={() => setBrushColor(color)}
-                              className={`h-8 w-8 rounded-full border-2 transition ${brushColor === color ? 'border-base-content scale-110' : 'border-base-200'}`}
-                              style={{ backgroundColor: color }}
-                              title={`Brush ${color}`}
-                            />
-                          ))}
-
-                          <select
-                            value={brushWidth}
-                            onChange={(event) => setBrushWidth(Number(event.target.value))}
-                            className="select select-bordered select-sm ml-auto w-28"
-                          >
-                            {[2, 3, 4, 6].map((width) => (
-                              <option key={width} value={width}>{width}px</option>
-                            ))}
-                          </select>
-
-                          <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm gap-2 text-error">
-                            <Trash2Icon className="size-4" /> Clear
-                          </button>
-                        </div>
-
-                        <div className="px-4 py-3 text-sm text-base-content/55">
-                          Sketch ideas live. Everyone in the meeting sees new strokes instantly.
-                        </div>
-
-                        <div className="min-h-0 flex-1 px-4 pb-4">
-                          <div
-                            ref={whiteboardRef}
-                            className="relative h-full min-h-[260px] rounded-2xl border border-base-300 bg-white shadow-inner touch-none sm:min-h-[320px]"
-                            onPointerDown={startDrawing}
-                            onPointerMove={continueDrawing}
-                            onPointerUp={stopDrawing}
-                            onPointerLeave={stopDrawing}
-                          >
-                            <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none">
-                              {renderedStrokes.map((stroke) => (
-                                <path
-                                  key={stroke.id}
-                                  d={pointsToSvgPath(stroke.points)}
-                                  fill="none"
-                                  stroke={stroke.color}
-                                  strokeWidth={stroke.width}
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              ))}
-                            </svg>
-                            {renderedStrokes.length === 0 && (
-                              <div className="absolute inset-0 flex items-center justify-center text-center text-base-content/35">
-                                <div>
-                                  <PenToolIcon className="mx-auto mb-3 size-8" />
-                                  <p className="font-medium">Start drawing on the board</p>
-                                  <p className="mt-1 text-sm">Use the color swatches above to annotate ideas together.</p>
+                        ) : (
+                          chatMessages.map((message) => {
+                            const isOwn = message.userId === user._id;
+                            return (
+                              <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${isOwn ? 'bg-primary text-primary-content' : 'bg-base-200 text-base-content'}`}>
+                                  <p className={`text-[11px] font-semibold uppercase tracking-wide ${isOwn ? 'text-primary-content/70' : 'text-base-content/45'}`}>
+                                    {isOwn ? 'You' : message.userName}
+                                  </p>
+                                  <p className="mt-1 whitespace-pre-wrap break-words text-sm">{message.text}</p>
                                 </div>
                               </div>
-                            )}
-                          </div>
+                            );
+                          })
+                        )}
+                        <div ref={messagesEndRef} />
+                      </div>
+
+                      <div className="border-t border-base-200 p-4">
+                        <div className="flex items-end gap-2">
+                          <textarea
+                            value={chatInput}
+                            onChange={(event) => setChatInput(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' && !event.shiftKey) {
+                                event.preventDefault();
+                                handleSendChatMessage();
+                              }
+                            }}
+                            className="textarea textarea-bordered min-h-[88px] flex-1 resize-none"
+                            placeholder="Type a message for everyone in the call…"
+                          />
+                          <button onClick={handleSendChatMessage} className="btn btn-primary btn-square">
+                            <SendIcon className="size-4" />
+                          </button>
                         </div>
                       </div>
-                    )}
+                    </div>
                   </aside>
                 )}
               </div>
+
+              {showWhiteboardPopup && (
+                <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/55 p-2 sm:p-6">
+                  <div className="flex h-full max-h-[95vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-base-300 bg-base-100 shadow-2xl">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-base-200 px-4 py-4 sm:px-5">
+                      <div>
+                        <div className="badge badge-outline mb-2">Collaborative whiteboard</div>
+                        <h3 className="text-lg font-bold text-base-content">Infinite-style workspace</h3>
+                        <p className="text-sm text-base-content/55">Draw, scroll, and expand the board as your discussion grows.</p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {WHITEBOARD_COLORS.map((color) => (
+                          <button
+                            key={color}
+                            onClick={() => setBrushColor(color)}
+                            className={`h-9 w-9 rounded-full border-2 transition ${brushColor === color ? 'border-base-content scale-110' : 'border-base-200'}`}
+                            style={{ backgroundColor: color }}
+                            title={`Brush ${color}`}
+                          />
+                        ))}
+
+                        <select
+                          value={brushWidth}
+                          onChange={(event) => setBrushWidth(Number(event.target.value))}
+                          className="select select-bordered select-sm w-28"
+                        >
+                          {[2, 3, 4, 6].map((width) => (
+                            <option key={width} value={width}>{width}px</option>
+                          ))}
+                        </select>
+
+                        <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm gap-2 text-error">
+                          <Trash2Icon className="size-4" /> Clear
+                        </button>
+                        <button onClick={() => setShowWhiteboardPopup(false)} className="btn btn-primary btn-sm gap-2">
+                          <XIcon className="size-4" /> Close
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="border-b border-base-200 px-4 py-3 text-sm text-base-content/55 sm:px-5">
+                      Scroll in any direction and keep drawing. The board expands automatically when you approach an edge.
+                    </div>
+
+                    <div ref={whiteboardScrollRef} className="min-h-0 flex-1 overflow-auto bg-base-200/60 p-4 sm:p-6">
+                      <div
+                        ref={whiteboardRef}
+                        className="relative rounded-3xl border border-base-300 bg-white shadow-inner touch-none"
+                        style={{ width: `${boardSize.width}px`, height: `${boardSize.height}px` }}
+                        onPointerDown={startDrawing}
+                        onPointerMove={continueDrawing}
+                        onPointerUp={stopDrawing}
+                        onPointerLeave={stopDrawing}
+                      >
+                        <svg className="absolute inset-0 h-full w-full">
+                          {renderedStrokes.map((stroke) => (
+                            <path
+                              key={stroke.id}
+                              d={pointsToSvgPath(stroke.points)}
+                              fill="none"
+                              stroke={stroke.color}
+                              strokeWidth={stroke.width}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          ))}
+                        </svg>
+
+                        {renderedStrokes.length === 0 && (
+                          <div className="absolute inset-0 flex items-center justify-center text-center text-base-content/35">
+                            <div>
+                              <PenToolIcon className="mx-auto mb-3 size-10" />
+                              <p className="font-medium">Start drawing on the whiteboard</p>
+                              <p className="mt-1 text-sm">Open more space just by drawing toward the edges.</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </StreamCall>
           </StreamVideo>
         ) : (
