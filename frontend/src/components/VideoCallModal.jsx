@@ -70,8 +70,9 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const customUnsubscribeRef = useRef(null);
 
   useEffect(() => {
-    setIsCamEnabled(callType === 'video');
-    setIsInCallCamEnabled(callType === 'video');
+    const shouldEnableCamera = callType === 'video';
+    setIsCamEnabled(shouldEnableCamera);
+    setIsInCallCamEnabled(shouldEnableCamera);
   }, [callType, isOpen]);
 
   useEffect(() => {
@@ -290,6 +291,10 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
         await videoCall.get();
       }
 
+      if (callType !== 'video') {
+        await videoCall.camera.disable().catch(() => {});
+      }
+
       // join() internally accepts the ring for the callee.
       await videoCall.join({ create: false });
 
@@ -304,7 +309,11 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       }
 
       if (!isMicEnabled) await videoCall.microphone.disable();
-      if (callType === 'video' && !isCamEnabled) await videoCall.camera.disable();
+      if (callType !== 'video') {
+        await videoCall.camera.disable().catch(() => {});
+      } else if (!isCamEnabled) {
+        await videoCall.camera.disable();
+      }
 
       registerCustomEventHandlers(videoCall);
       setCall(videoCall);
@@ -532,12 +541,12 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center">
-      <div className="relative w-full h-full max-w-7xl max-h-[90vh] mx-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-0 sm:p-4">
+      <div className="relative h-full w-full max-w-7xl overflow-hidden sm:max-h-[92vh] sm:rounded-3xl">
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-50 btn btn-circle btn-error"
+          className="absolute right-3 top-3 z-50 btn btn-circle btn-error btn-sm sm:right-4 sm:top-4"
         >
           <XIcon className="size-5" />
         </button>
@@ -546,12 +555,12 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
         {client && call ? (
           <StreamVideo client={client}>
             <StreamCall call={call}>
-              <div className="h-full flex bg-base-300 rounded-xl overflow-hidden border border-base-200">
+              <div className="flex h-full flex-col bg-base-300 sm:rounded-3xl overflow-hidden border border-base-200 xl:flex-row">
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="flex items-center justify-between border-b border-base-200 bg-base-100 px-5 py-4">
-                    <div>
+                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-base-200 bg-base-100 px-4 py-4 sm:px-5">
+                    <div className="min-w-0 flex-1">
                       <div className="badge badge-outline mb-2">{callType === 'video' ? 'Live video call' : 'Live voice call'}</div>
-                      <h3 className="text-lg font-bold text-base-content">
+                      <h3 className="truncate text-base font-bold text-base-content sm:text-lg">
                         {participantNames.length ? participantNames.join(', ') : 'Team call'}
                       </h3>
                       <p className="text-sm text-base-content/55">
@@ -561,18 +570,18 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
                     <button
                       onClick={() => setIsSidebarOpen((prev) => !prev)}
-                      className="btn btn-ghost btn-sm gap-2"
+                      className="btn btn-ghost btn-sm gap-2 self-center xl:self-auto"
                     >
                       {isSidebarOpen ? <XIcon className="size-4" /> : <MessageSquareIcon className="size-4" />}
                       {isSidebarOpen ? 'Hide tools' : 'Show tools'}
                     </button>
                   </div>
 
-                  <div className="relative min-h-0 flex-1 bg-slate-950">
+                  <div className={`relative bg-slate-950 ${isSidebarOpen ? 'min-h-[38vh] xl:min-h-0' : 'min-h-[50vh] xl:min-h-0'} flex-1`}>
                     <SpeakerLayout />
                   </div>
 
-                  <div className="border-t border-base-200 bg-base-100 px-4 py-4">
+                  <div className="border-t border-base-200 bg-base-100 px-3 py-3 sm:px-4 sm:py-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <button
@@ -630,9 +639,9 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                 </div>
 
                 {isSidebarOpen && (
-                  <aside className="flex h-full w-full max-w-[380px] flex-col border-l border-base-200 bg-base-100">
-                    <div className="flex items-center justify-between border-b border-base-200 px-4 py-4">
-                      <div className="flex items-center gap-2">
+                  <aside className="flex w-full flex-col border-t border-base-200 bg-base-100 xl:h-full xl:max-w-[380px] xl:border-l xl:border-t-0">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-base-200 px-4 py-4">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           onClick={() => setActivePanel('chat')}
                           className={`btn btn-sm gap-2 ${activePanel === 'chat' ? 'btn-secondary' : 'btn-ghost'}`}
@@ -646,14 +655,14 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                           <PenToolIcon className="size-4" /> Whiteboard
                         </button>
                       </div>
-                      <button onClick={() => setIsSidebarOpen(false)} className="btn btn-ghost btn-sm btn-circle">
+                      <button onClick={() => setIsSidebarOpen(false)} className="btn btn-ghost btn-sm btn-circle self-start">
                         <XIcon className="size-4" />
                       </button>
                     </div>
 
                     {activePanel === 'chat' ? (
                       <div className="flex min-h-0 flex-1 flex-col">
-                        <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                        <div className="max-h-[36vh] flex-1 space-y-3 overflow-y-auto px-4 py-4 xl:max-h-none">
                           {chatMessages.length === 0 ? (
                             <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/50 p-6 text-center">
                               <MessageSquareIcon className="mx-auto mb-3 size-8 text-base-content/25" />
@@ -733,7 +742,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                         <div className="min-h-0 flex-1 px-4 pb-4">
                           <div
                             ref={whiteboardRef}
-                            className="relative h-full min-h-[320px] rounded-2xl border border-base-300 bg-white shadow-inner touch-none"
+                            className="relative h-full min-h-[260px] rounded-2xl border border-base-300 bg-white shadow-inner touch-none sm:min-h-[320px]"
                             onPointerDown={startDrawing}
                             onPointerMove={continueDrawing}
                             onPointerUp={stopDrawing}
@@ -771,9 +780,9 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
             </StreamCall>
           </StreamVideo>
         ) : (
-          <div className="h-full flex items-center justify-center">
-            <div className="w-full max-w-5xl grid lg:grid-cols-[1.1fr_0.9fr] gap-6 bg-base-100 rounded-3xl overflow-hidden shadow-2xl border border-base-300">
-              <div className="relative min-h-[420px] bg-neutral text-neutral-content flex items-center justify-center">
+          <div className="flex h-full items-center justify-center">
+            <div className="grid h-full w-full max-w-5xl gap-0 overflow-hidden border border-base-300 bg-base-100 shadow-2xl sm:rounded-3xl lg:h-auto lg:grid-cols-[1.1fr_0.9fr] lg:gap-6">
+              <div className="relative flex min-h-[300px] items-center justify-center bg-neutral text-neutral-content sm:min-h-[420px]">
                 {callType === 'video' && previewStream ? (
                   <video
                     ref={previewVideoRef}
@@ -809,9 +818,9 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                 </div>
               </div>
 
-              <div className="p-8 flex flex-col justify-center">
+              <div className="flex flex-col justify-center p-5 sm:p-8">
                 <div className="badge badge-outline mb-4 w-fit">{callType === 'video' ? 'Video Call' : 'Voice Call'}</div>
-                <h2 className="text-3xl font-bold text-base-content">Ready to join?</h2>
+                <h2 className="text-2xl font-bold text-base-content sm:text-3xl">Ready to join?</h2>
                 <p className="mt-3 text-base-content/60">
                   You are about to join with {isMicEnabled ? 'microphone on' : 'microphone off'}{callType === 'video' ? ` and ${isCamEnabled ? 'camera on' : 'camera off'}` : ''}.
                 </p>
@@ -880,7 +889,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                   </div>
                 </div>
 
-                <div className="mt-8 flex gap-3">
+                <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                   <button onClick={onClose} className="btn btn-ghost flex-1">Cancel</button>
                   <button onClick={joinCall} className={`btn btn-primary flex-1 ${isJoining ? 'btn-disabled' : ''}`}>
                     {isJoining ? 'Joining…' : 'Join now'}
