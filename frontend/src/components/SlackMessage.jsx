@@ -4,7 +4,6 @@ import {
     useChannelActionContext,
     ReactionSelector,
     ReactionsList,
-    MessageActionsBox,
 } from "stream-chat-react";
 import Avatar from "./Avatar";
 import { getUserImage } from "../lib/userImageCache";
@@ -28,11 +27,12 @@ const SlackMessage = () => {
         message,
         isMyMessage,
         handleOpenThread,
-        handleRetry,
         editing,
         EditMessageInput,
         groupStyles,
-        handleAction,
+        handleDelete,
+        handleEdit,
+        handleReaction,
         onUserClick,
     } = useMessageContext();
 
@@ -272,11 +272,13 @@ const SlackMessage = () => {
                     {showReactions && (
                         <div style={{ position: "absolute", bottom: "calc(100% + 6px)", right: 0, zIndex: 400 }}>
                             <ReactionSelector
-                                handleReaction={(reactionType, e) => {
-                                    handleAction(reactionType, e);
+                                handleReaction={(reactionType, event) => {
+                                    handleReaction(reactionType, event);
                                     setShowReactions(false);
                                 }}
-                                latestReactions={message.latest_reactions}
+                                latest_reactions={message.latest_reactions}
+                                own_reactions={message.own_reactions}
+                                reaction_groups={message.reaction_groups}
                             />
                         </div>
                     )}
@@ -339,15 +341,40 @@ const SlackMessage = () => {
                                 padding: "4px 0",
                             }}
                         >
-                            <MessageActionsBox
-                                getMessageActions={() =>
-                                    isMine
-                                        ? ["edit", "delete", "react", "reply"]
-                                        : ["react", "reply"]
-                                }
-                                open
-                                mine={isMine}
-                            />
+                            <button
+                                type="button"
+                                className="w-full px-4 py-2 text-left text-sm hover:bg-base-200 transition-colors"
+                                onClick={(event) => {
+                                    handleQuotedMessageChange(message);
+                                    setShowActions(false);
+                                }}
+                            >
+                                Reply
+                            </button>
+                            {isMine && (
+                                <>
+                                    <button
+                                        type="button"
+                                        className="w-full px-4 py-2 text-left text-sm hover:bg-base-200 transition-colors"
+                                        onClick={(event) => {
+                                            handleEdit(event);
+                                            setShowActions(false);
+                                        }}
+                                    >
+                                        Edit message
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="w-full px-4 py-2 text-left text-sm text-error hover:bg-base-200 transition-colors"
+                                        onClick={(event) => {
+                                            handleDelete(event);
+                                            setShowActions(false);
+                                        }}
+                                    >
+                                        Delete message
+                                    </button>
+                                </>
+                            )}
                         </div>
                     )}
                 </div>

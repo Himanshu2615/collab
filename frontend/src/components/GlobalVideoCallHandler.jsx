@@ -7,6 +7,7 @@ import { getStreamToken } from '../lib/api';
 import { useStreamContext } from '../context/StreamContext';
 import IncomingCallNotification from './IncomingCallNotification';
 import VideoCallModal from './VideoCallModal';
+import { removeActiveCall, saveCallLog, updateCallLog, upsertActiveCall } from '../lib/callHistory';
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 
@@ -37,12 +38,6 @@ const GlobalVideoCallHandler = () => {
   const isCallMutedLiveRef = useRef(isCallMutedLive);
   useEffect(() => { isCallMutedLiveRef.current = isCallMutedLive; }, [isCallMutedLive]);
   useEffect(() => { incomingCallRef.current = incomingCall; }, [incomingCall]);
-
-  const appendCallLog = (entry) => {
-    const logs = JSON.parse(localStorage.getItem('callLogs') || '[]');
-    logs.unshift(entry);
-    localStorage.setItem('callLogs', JSON.stringify(logs.slice(0, 50)));
-  };
 
   const buildIncomingCallFromEvent = (event) => {
     if (!event?.call_cid) return null;
@@ -111,8 +106,29 @@ const GlobalVideoCallHandler = () => {
       // Respect per-conversation call mute preference
       if (isCallMutedLiveRef.current?.(nextIncomingCall.conversationId)) {
         mutedIncomingCallRef.current = nextIncomingCall;
+        upsertActiveCall({
+          callId: nextIncomingCall.callId,
+          conversationId: nextIncomingCall.conversationId,
+          type: nextIncomingCall.type,
+          participantIds: nextIncomingCall.participantIds,
+          participantNames: nextIncomingCall.participantNames,
+          participantProfiles: nextIncomingCall.participantProfiles,
+          startedAt: nextIncomingCall.startedAt,
+          status: 'ringing',
+        });
         return;
       }
+
+      upsertActiveCall({
+        callId: nextIncomingCall.callId,
+        conversationId: nextIncomingCall.conversationId,
+        type: nextIncomingCall.type,
+        participantIds: nextIncomingCall.participantIds,
+        participantNames: nextIncomingCall.participantNames,
+        participantProfiles: nextIncomingCall.participantProfiles,
+        startedAt: nextIncomingCall.startedAt,
+        status: 'ringing',
+      });
 
       setIncomingCall(nextIncomingCall);
 
@@ -146,16 +162,19 @@ const GlobalVideoCallHandler = () => {
           ? mutedIncomingCallRef.current
           : null;
       if (loggedCall) {
-        appendCallLog({
+        saveCallLog({
           callId: endedCallId,
+          conversationId: loggedCall.conversationId,
           type: loggedCall.type,
           startTime: loggedCall.startedAt || new Date().toISOString(),
           participants: loggedCall.participantNames?.length
             ? loggedCall.participantNames
             : [loggedCall.callerName],
           participantIds: loggedCall.participantIds || [],
+          participantProfiles: loggedCall.participantProfiles || [],
           status: 'missed',
         });
+        removeActiveCall(endedCallId);
       }
     };
 
@@ -179,6 +198,10 @@ const GlobalVideoCallHandler = () => {
 
     const unsubscribeEnd = videoClient.on('call.ended', (event) => {
       const id = event.call?.id || event.call_cid?.split(':')[1];
+      if (id) {
+        updateCallLog(id, { endTime: new Date().toISOString(), status: 'ended' });
+        removeActiveCall(id);
+      }
       if (id && activeIncomingCallIdRef.current === id) {
         logMissedCall(id);
         activeIncomingCallIdRef.current = null;
@@ -209,6 +232,7 @@ const GlobalVideoCallHandler = () => {
 
     setCallInfo({
       callId: accepted.callId,
+      conversationId: accepted.conversationId,
       participantIds: accepted.participantIds || [],
       participantNames: accepted.participantNames?.length
         ? accepted.participantNames
@@ -239,16 +263,19 @@ const GlobalVideoCallHandler = () => {
       console.error('Error declining call:', err);
     }
 
-    appendCallLog({
+    saveCallLog({
       callId: declined.callId,
+      conversationId: declined.conversationId,
       type: declined.type,
       startTime: declined.startedAt || new Date().toISOString(),
       participants: declined.participantNames?.length
         ? declined.participantNames
         : [declined.callerName],
       participantIds: declined.participantIds || [],
+      participantProfiles: declined.participantProfiles || [],
       status: 'missed',
     });
+    removeActiveCall(declined.callId);
   };
 
   const callPrefs = incomingCall
@@ -284,6 +311,7 @@ const GlobalVideoCallHandler = () => {
           participantNames={callInfo.participantNames}
           participantProfiles={callInfo.participantProfiles}
           callType={callInfo.callType}
+          conversationId={callInfo.conversationId}
         />
       )}
     </>

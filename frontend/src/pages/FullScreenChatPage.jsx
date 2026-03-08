@@ -7,6 +7,7 @@ import { getStreamToken, ensureOrgChannel } from "../lib/api";
 import Avatar from "../components/Avatar";
 import { setUserImageCache, getUserImage } from "../lib/userImageCache";
 import { useStreamContext } from "../context/StreamContext";
+import { getActiveCallByConversation, isCallOngoing, subscribeToCallStore } from "../lib/callHistory";
 
 import {
   Channel,
@@ -44,6 +45,60 @@ import SlackMessage from "../components/SlackMessage";
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 
+const getPresenceMeta = (user) => {
+  if (!user) {
+    return {
+      dotClassName: "bg-base-content/30",
+      label: "Offline",
+      textClassName: "text-base-content/55",
+    };
+  }
+
+  if (user.online) {
+    return {
+      dotClassName: "bg-success animate-pulse",
+      label: "Online",
+      textClassName: "text-success",
+    };
+  }
+
+  if (user.last_active) {
+    const lastActive = new Date(user.last_active);
+    const diffMinutes = Math.max(0, Math.floor((Date.now() - lastActive.getTime()) / 60000));
+
+    if (diffMinutes < 1) {
+      return {
+        dotClassName: "bg-success",
+        label: "Active just now",
+        textClassName: "text-success",
+      };
+    }
+
+    if (diffMinutes < 60) {
+      return {
+        dotClassName: "bg-base-content/30",
+        label: `Active ${diffMinutes}m ago`,
+        textClassName: "text-base-content/55",
+      };
+    }
+
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) {
+      return {
+        dotClassName: "bg-base-content/30",
+        label: `Active ${diffHours}h ago`,
+        textClassName: "text-base-content/55",
+      };
+    }
+  }
+
+  return {
+    dotClassName: "bg-base-content/30",
+    label: "Offline",
+    textClassName: "text-base-content/55",
+  };
+};
+
 const FullScreenChatPage = () => {
   const { id: channelOrUserId } = useParams();
 
@@ -54,7 +109,7 @@ const FullScreenChatPage = () => {
   const [showMembers, setShowMembers] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
-  const [isCallActive, setIsCallActive] = useState(false);
+  const [activeConversationCall, setActiveConversationCall] = useState(null);
   const [callDuration, setCallDuration] = useState(0);
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [callId, setCallId] = useState(null);
@@ -209,16 +264,33 @@ const FullScreenChatPage = () => {
     };
   }, [tokenData, authUser, channelOrUserId]);
 
+  const conversationId = channel?.id || channelOrUserId;
+
+  useEffect(() => {
+    if (!conversationId) return undefined;
+
+    const refresh = () => setActiveConversationCall(getActiveCallByConversation(conversationId));
+    refresh();
+
+    return subscribeToCallStore(refresh);
+  }, [conversationId]);
+
   // Call timer
   useEffect(() => {
     let interval;
-    if (isCallActive) {
-      interval = setInterval(() => setCallDuration((p) => p + 1), 1000);
+    if (isCallOngoing(activeConversationCall) && activeConversationCall?.startedAt) {
+      const syncDuration = () => {
+        setCallDuration(Math.max(0, Math.floor((Date.now() - new Date(activeConversationCall.startedAt).getTime()) / 1000)));
+      };
+      syncDuration();
+      interval = setInterval(syncDuration, 1000);
+    } else {
+      setCallDuration(0);
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isCallActive]);
+  }, [activeConversationCall]);
 
   if (loading || !chatClient || !channel) return <ChatLoader />;
 
@@ -244,6 +316,7 @@ const FullScreenChatPage = () => {
   const dmPartner = !isChannel
     ? memberList.find((m) => m.user_id !== authUser._id)?.user
     : null;
+  const dmPartnerPresence = getPresenceMeta(dmPartner);
 
   const rawChannelName = channel.data?.name || channelOrUserId;
   const displayName = isChannel
@@ -310,9 +383,9 @@ const FullScreenChatPage = () => {
                   </span>
                 )}
                 {!isChannel && dmPartner && (
-                  <span className="text-[13px] font-medium leading-tight mt-0.5 flex items-center gap-1.5 text-success">
-                    <span className="w-1.5 h-1.5 bg-success rounded-full animate-pulse"></span>
-                    Online
+                  <span className={`text-[13px] font-medium leading-tight mt-0.5 flex items-center gap-1.5 ${dmPartnerPresence.textClassName}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${dmPartnerPresence.dotClassName}`}></span>
+                    {dmPartnerPresence.label}
                   </span>
                 )}
               </button>
@@ -349,13 +422,24 @@ const FullScreenChatPage = () => {
 
                 {/* Action buttons */}
                 <div className="flex items-center gap-1 bg-base-200/50 p-1 rounded-xl">
-                  {isCallActive ? (
-                    <div className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold bg-error/10 text-error animate-pulse border border-error/20 shadow-sm">
+                  {isCallOngoing(activeConversationCall) ? (
+                    <div className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold bg-success/10 text-success border border-success/20 shadow-sm">
                       <span className="tabular-nums">
                         {Math.floor(callDuration / 60)}:{(callDuration % 60).toString().padStart(2, "0")}
                       </span>
-                      <button onClick={() => { setIsCallActive(false); setCallDuration(0); }} className="hover:bg-error/20 p-1 rounded-md transition-colors">
-                        <XIcon className="size-4" />
+                      <button
+                        onClick={() => {
+                          setCallId(activeConversationCall.callId);
+                          setCallParticipantIds(activeConversationCall.participantIds?.length ? [authUser._id, ...activeConversationCall.participantIds.filter((id) => id !== authUser._id)] : participantIds);
+                          setCallParticipantNames(activeConversationCall.participantNames?.length ? activeConversationCall.participantNames : participantNames);
+                          setCallParticipantProfiles(activeConversationCall.participantProfiles?.length ? activeConversationCall.participantProfiles : participantProfiles);
+                          setCallType(activeConversationCall.type || "video");
+                          setIsInitiatingCall(false);
+                          setShowVideoCall(true);
+                        }}
+                        className="btn btn-xs btn-success"
+                      >
+                        Rejoin
                       </button>
                     </div>
                   ) : (
@@ -375,7 +459,6 @@ const FullScreenChatPage = () => {
                           setCallType("audio");
                           setIsInitiatingCall(true);
                           setShowVideoCall(true);
-                          setIsCallActive(true);
                         }}
                         className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
                       >
@@ -397,7 +480,6 @@ const FullScreenChatPage = () => {
                           setCallType("video");
                           setIsInitiatingCall(true);
                           setShowVideoCall(true);
-                          setIsCallActive(true);
                         }}
                         className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
                       >
@@ -508,8 +590,6 @@ const FullScreenChatPage = () => {
         isOpen={showVideoCall}
         onClose={() => {
           setShowVideoCall(false);
-          setIsCallActive(false);
-          setCallDuration(0);
           setCallParticipantIds([]);
           setCallParticipantNames([]);
           setCallParticipantProfiles([]);
@@ -524,19 +604,29 @@ const FullScreenChatPage = () => {
         participantNames={callParticipantNames}
         participantProfiles={callParticipantProfiles}
         callType={callType}
+        conversationId={conversationId}
       />
       <CallLogsPanel
         isOpen={showCallLogs}
         onClose={() => setShowCallLogs(false)}
+        conversationId={conversationId}
         onCallBack={(log) => {
           setCallId(`call-${channelOrUserId}-${Date.now()}`);
           setCallParticipantIds(log?.participantIds?.length ? [authUser._id, ...log.participantIds] : participantIds);
           setCallParticipantNames(log?.participants?.length ? log.participants : participantNames);
-          setCallParticipantProfiles(participantProfiles);
+          setCallParticipantProfiles(log?.participantProfiles?.length ? log.participantProfiles : participantProfiles);
           setCallType(log?.type || "video");
           setIsInitiatingCall(true);
           setShowVideoCall(true);
-          setIsCallActive(true);
+        }}
+        onRejoin={(log) => {
+          setCallId(log.callId);
+          setCallParticipantIds(log?.participantIds?.length ? [authUser._id, ...log.participantIds] : participantIds);
+          setCallParticipantNames(log?.participants?.length ? log.participants : participantNames);
+          setCallParticipantProfiles(log?.participantProfiles?.length ? log.participantProfiles : participantProfiles);
+          setCallType(log?.type || "video");
+          setIsInitiatingCall(false);
+          setShowVideoCall(true);
         }}
       />
     </div>

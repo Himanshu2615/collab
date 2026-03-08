@@ -21,6 +21,7 @@ import {
 import toast from 'react-hot-toast';
 import '@stream-io/video-react-sdk/dist/css/styles.css';
 import Avatar from './Avatar';
+import { saveCallLog, updateCallLog, upsertActiveCall } from '../lib/callHistory';
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 const CALL_CHAT_EVENT = 'bizzcolab.call.chat';
@@ -154,6 +155,38 @@ const InCallRecordingButton = ({ onStateChange }) => {
   );
 };
 
+const InCallInviteBackButton = ({ members = [], onInvite }) => {
+  const { useParticipants } = useCallStateHooks();
+  const participants = useParticipants();
+
+  const missingMembers = useMemo(() => {
+    const joinedIds = new Set(
+      (participants || [])
+        .map((participant) => participant?.userId || participant?.sessionId)
+        .filter(Boolean)
+    );
+
+    return members.filter((member) => member?.id && !member.isYou && !joinedIds.has(member.id));
+  }, [members, participants]);
+
+  const label = missingMembers.length > 0
+    ? missingMembers.length === 1
+      ? `Invite ${missingMembers[0].name.split(' ')[0] || 'back'}`
+      : `Invite ${missingMembers.length} back`
+    : 'Everyone is here';
+
+  return (
+    <button
+      onClick={() => onInvite?.(missingMembers)}
+      disabled={missingMembers.length === 0}
+      className={`btn btn-sm gap-2 ${missingMembers.length > 0 ? 'btn-outline border-white/20 text-white hover:bg-white/10' : 'btn-disabled'}`}
+      title={missingMembers.length > 0 ? 'Ring members who left or have not joined yet' : 'All invited members are already in the call'}
+    >
+      <UsersIcon className="size-4" /> {label}
+    </button>
+  );
+};
+
 const VideoCallModal = ({
   isOpen,
   onClose,
@@ -165,6 +198,7 @@ const VideoCallModal = ({
   participantNames = [],
   participantProfiles = [],
   callType = 'video',
+  conversationId = '',
 }) => {
   const [client, setClient] = useState(null);
   const [call, setCall] = useState(null);
@@ -211,6 +245,7 @@ const VideoCallModal = ({
   const customUnsubscribeRef = useRef(null);
   const draftStrokeRef = useRef(null);
   const personalDraftStrokeRef = useRef(null);
+  const hasJoinedCallRef = useRef(false);
 
   const updateDraftStroke = (updater) => {
     setDraftStroke((prev) => {
@@ -369,10 +404,25 @@ const VideoCallModal = ({
       customUnsubscribeRef.current?.();
       customUnsubscribeRef.current = null;
       if (currentCall) {
-        updateCallLog(callId, { endTime: new Date().toISOString(), status: 'ended' });
+        if (hasJoinedCallRef.current) {
+          updateCallLog(callId, {
+            status: 'left',
+            lastLeftAt: new Date().toISOString(),
+          });
+          upsertActiveCall({
+            callId,
+            conversationId,
+            type: callType,
+            participantIds: Array.from(new Set(participantIds)).filter(Boolean),
+            participantNames: Array.from(new Set(participantNames)).filter(Boolean),
+            participantProfiles,
+            status: 'ongoing',
+          });
+        }
         currentCall.leave().catch(() => {});
       }
       callRef.current = null;
+      hasJoinedCallRef.current = false;
       setCall(null);
       setClient(null);
       setIsRecording(false);
@@ -389,7 +439,7 @@ const VideoCallModal = ({
       });
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, callId, token, user]);
+  }, [callId, callType, conversationId, isOpen, participantIds, participantNames, participantProfiles, token, user]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -573,14 +623,25 @@ const VideoCallModal = ({
         return null;
       });
 
-      saveCallLog({
+      const callLog = {
         callId,
+        conversationId,
         type: callType,
         startTime: new Date().toISOString(),
         participants: Array.from(new Set(participantNames)).filter(Boolean),
         participantIds: Array.from(new Set(participantIds)).filter((id) => id && id !== user._id),
+        participantProfiles: meetingRoster.filter((member) => !member.isYou),
         status: 'started',
+      };
+
+      saveCallLog(callLog);
+      upsertActiveCall({
+        ...callLog,
+        status: 'ongoing',
+        startedAt: callLog.startTime,
+        joinedAt: new Date().toISOString(),
       });
+      hasJoinedCallRef.current = true;
 
       toast.success('Connected to call');
     };
@@ -594,21 +655,6 @@ const VideoCallModal = ({
       onClose?.();
     } finally {
       setIsJoining(false);
-    }
-  };
-
-  const saveCallLog = (log) => {
-    const logs = JSON.parse(localStorage.getItem('callLogs') || '[]');
-    logs.unshift(log);
-    localStorage.setItem('callLogs', JSON.stringify(logs.slice(0, 50))); // Keep last 50 calls
-  };
-
-  const updateCallLog = (callId, updates) => {
-    const logs = JSON.parse(localStorage.getItem('callLogs') || '[]');
-    const index = logs.findIndex(log => log.callId === callId);
-    if (index !== -1) {
-      logs[index] = { ...logs[index], ...updates };
-      localStorage.setItem('callLogs', JSON.stringify(logs));
     }
   };
 
@@ -638,9 +684,40 @@ const VideoCallModal = ({
       next.recordingEndedAt = new Date().toISOString();
     }
 
-    logs[index] = next;
-    localStorage.setItem('callLogs', JSON.stringify(logs));
+    updateCallLog(callId, next);
   }, [callId, canRecord, isRecording]);
+
+  const handleInviteMembersAgain = async (membersToInvite = []) => {
+    const activeCall = callRef.current || call;
+    const invitees = membersToInvite.filter((member) => member?.id && !member.isYou);
+
+    if (!activeCall || invitees.length === 0) return;
+
+    try {
+      await activeCall.updateCallMembers({
+        update_members: invitees.map((member) => ({ user_id: member.id })),
+      });
+      await activeCall.ring();
+
+      updateCallLog(callId, {
+        lastRangAt: new Date().toISOString(),
+        ringAgainCount: ((JSON.parse(localStorage.getItem('callLogs') || '[]').find((entry) => entry.callId === callId)?.ringAgainCount) || 0) + 1,
+      });
+      upsertActiveCall({
+        callId,
+        conversationId,
+        participantIds: Array.from(new Set(participantIds)).filter(Boolean),
+        participantNames: Array.from(new Set(participantNames)).filter(Boolean),
+        participantProfiles: meetingRoster.filter((member) => !member.isYou),
+        status: 'ongoing',
+      });
+
+      toast.success(invitees.length === 1 ? `Ringing ${invitees[0].name} again` : `Ringing ${invitees.length} members again`);
+    } catch (error) {
+      console.error('Invite back error:', error);
+      toast.error('Could not ring members again');
+    }
+  };
 
   const toggleInCallMicrophone = async () => {
     const activeCall = callRef.current || call;
@@ -683,10 +760,24 @@ const VideoCallModal = ({
   const leaveCurrentCall = async () => {
     const activeCall = callRef.current || call;
     try {
+      updateCallLog(callId, {
+        status: 'left',
+        lastLeftAt: new Date().toISOString(),
+      });
+      upsertActiveCall({
+        callId,
+        conversationId,
+        type: callType,
+        participantIds: Array.from(new Set(participantIds)).filter(Boolean),
+        participantNames: Array.from(new Set(participantNames)).filter(Boolean),
+        participantProfiles: meetingRoster.filter((member) => !member.isYou),
+        status: 'ongoing',
+      });
       await activeCall?.leave();
     } catch (_) {
       // noop
     }
+    hasJoinedCallRef.current = false;
     onClose?.();
   };
 
@@ -1266,6 +1357,8 @@ const VideoCallModal = ({
 
                         <InCallScreenShareButton />
 
+                        <InCallInviteBackButton members={meetingRoster} onInvite={handleInviteMembersAgain} />
+
                         <button
                           onClick={() => {
                             setShowWhiteboardPopup(true);
@@ -1279,7 +1372,7 @@ const VideoCallModal = ({
                         </button>
 
                         <button onClick={leaveCurrentCall} className="btn btn-error btn-sm gap-2">
-                          <PhoneOffIcon className="size-4" /> End call
+                          <PhoneOffIcon className="size-4" /> Leave call
                         </button>
                       </div>
                     </div>
@@ -1372,6 +1465,9 @@ const VideoCallModal = ({
                         ) : (
                           <div className="flex-1 overflow-y-auto px-4 py-4">
                             <div className="space-y-3">
+                              <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/45 p-3 text-sm text-base-content/60">
+                                Anyone who leaves early can be invited back from here.
+                              </div>
                               {meetingRoster.map((member, index) => (
                                 <div key={`${member.id}-${index}`} className="flex items-center gap-3 rounded-2xl border border-base-300 bg-base-100 px-3 py-3 shadow-sm">
                                   <Avatar src={member.image} name={member.name} size="w-10 h-10" />
@@ -1379,6 +1475,15 @@ const VideoCallModal = ({
                                     <p className="truncate text-sm font-semibold">{member.isYou ? 'You' : member.name}</p>
                                     <p className="text-xs text-base-content/50">{member.isYou ? 'Organizer view' : 'Connected participant'}</p>
                                   </div>
+                                  {!member.isYou && (
+                                    <button
+                                      onClick={() => handleInviteMembersAgain([member])}
+                                      className="btn btn-ghost btn-sm"
+                                      title={`Invite ${member.name} back`}
+                                    >
+                                      Invite back
+                                    </button>
+                                  )}
                                 </div>
                               ))}
                             </div>
