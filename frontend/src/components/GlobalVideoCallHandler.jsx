@@ -48,9 +48,13 @@ const GlobalVideoCallHandler = () => {
     if (!event?.call_cid) return null;
 
     const callId = event.call?.id || event.call_cid.split(':')[1] || event.call_cid;
+    const members = Array.isArray(event.members) ? event.members : [];
     const createdBy = event.call?.created_by || event.created_by || null;
     const creator = createdBy?.id ? createdBy : (event.user?.id ? event.user : null);
     const callerUserId = creator?.id || null;
+    const callerMember = callerUserId
+      ? members.find((member) => member.user_id === callerUserId)
+      : null;
 
     if (callerUserId && callerUserId === authUser._id) return null;
 
@@ -58,7 +62,6 @@ const GlobalVideoCallHandler = () => {
       ? [authUser._id, callerUserId].sort().join('-')
       : null;
 
-    const members = Array.isArray(event.members) ? event.members : [];
     const participantIds = members.map((m) => m.user_id).filter(Boolean);
     const participantNames = members
       .map((m) => m.user?.name || m.user_id)
@@ -71,8 +74,8 @@ const GlobalVideoCallHandler = () => {
 
     return {
       callId,
-      callerName: creator?.name || createdBy?.name || event.user?.name || 'Someone',
-      callerImage: creator?.image || createdBy?.image || event.user?.image || '',
+      callerName: callerMember?.user?.name || creator?.name || createdBy?.name || event.user?.name || 'Someone',
+      callerImage: callerMember?.user?.image || callerMember?.user?.profilePic || creator?.image || createdBy?.image || event.user?.image || '',
       type: (event.video ?? event.call?.video ?? true) ? 'video' : 'audio',
       conversationId,
       callerUserId,

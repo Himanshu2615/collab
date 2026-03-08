@@ -1011,7 +1011,7 @@ const VideoCallModal = ({
     () =>
       forwardRef(function CallVideoPlaceholder({ participant, style, className = '', ...rest }, ref) {
         const displayName = participant?.name || participant?.userId || 'Participant';
-        const displayImage = participant?.image || participantImageLookup.get(participant?.userId) || participantImageLookup.get(displayName) || '';
+        const displayImage = participantImageLookup.get(participant?.userId) || participantImageLookup.get(displayName) || participant?.image || '';
 
         return (
           <div
