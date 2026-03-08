@@ -60,6 +60,7 @@ const FullScreenChatPage = () => {
   const [callId, setCallId] = useState(null);
   const [callParticipantIds, setCallParticipantIds] = useState([]);
   const [callParticipantNames, setCallParticipantNames] = useState([]);
+  const [callParticipantProfiles, setCallParticipantProfiles] = useState([]);
   const [callType, setCallType] = useState("video");
   const [isInitiatingCall, setIsInitiatingCall] = useState(false);
   const [showCallLogs, setShowCallLogs] = useState(false);
@@ -233,6 +234,13 @@ const FullScreenChatPage = () => {
         .filter(Boolean)
     )
   );
+  const participantProfiles = memberList.map((member) => ({
+    id: member.user_id,
+    name: member.user?.name || member.user_id,
+    image: member.user_id === authUser._id
+      ? authUser.profilePic
+      : (getUserImage(member.user_id) || member.user?.image || member.user?.profilePic || ""),
+  }));
   const dmPartner = !isChannel
     ? memberList.find((m) => m.user_id !== authUser._id)?.user
     : null;
@@ -363,6 +371,7 @@ const FullScreenChatPage = () => {
                           setCallId(`call-${channelOrUserId}-${Date.now()}`);
                           setCallParticipantIds(participantIds);
                           setCallParticipantNames(participantNames);
+                          setCallParticipantProfiles(participantProfiles);
                           setCallType("audio");
                           setIsInitiatingCall(true);
                           setShowVideoCall(true);
@@ -384,6 +393,7 @@ const FullScreenChatPage = () => {
                           setCallId(`call-${channelOrUserId}-${Date.now()}`);
                           setCallParticipantIds(participantIds);
                           setCallParticipantNames(participantNames);
+                          setCallParticipantProfiles(participantProfiles);
                           setCallType("video");
                           setIsInitiatingCall(true);
                           setShowVideoCall(true);
@@ -502,6 +512,7 @@ const FullScreenChatPage = () => {
           setCallDuration(0);
           setCallParticipantIds([]);
           setCallParticipantNames([]);
+          setCallParticipantProfiles([]);
           setCallType("video");
           setIsInitiatingCall(false);
         }}
@@ -511,6 +522,7 @@ const FullScreenChatPage = () => {
         isInitiator={isInitiatingCall}
         participantIds={callParticipantIds}
         participantNames={callParticipantNames}
+        participantProfiles={callParticipantProfiles}
         callType={callType}
       />
       <CallLogsPanel
@@ -520,6 +532,7 @@ const FullScreenChatPage = () => {
           setCallId(`call-${channelOrUserId}-${Date.now()}`);
           setCallParticipantIds(log?.participantIds?.length ? [authUser._id, ...log.participantIds] : participantIds);
           setCallParticipantNames(log?.participants?.length ? log.participants : participantNames);
+          setCallParticipantProfiles(participantProfiles);
           setCallType(log?.type || "video");
           setIsInitiatingCall(true);
           setShowVideoCall(true);

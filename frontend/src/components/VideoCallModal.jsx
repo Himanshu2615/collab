@@ -82,7 +82,18 @@ const InCallScreenShareButton = () => {
   );
 };
 
-const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, participantIds = [], participantNames = [], callType = 'video' }) => {
+const VideoCallModal = ({
+  isOpen,
+  onClose,
+  callId,
+  token,
+  user,
+  isInitiator,
+  participantIds = [],
+  participantNames = [],
+  participantProfiles = [],
+  callType = 'video',
+}) => {
   const [client, setClient] = useState(null);
   const [call, setCall] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -108,10 +119,13 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const [chatInput, setChatInput] = useState('');
   const [whiteboardStrokes, setWhiteboardStrokes] = useState([]);
   const [draftStroke, setDraftStroke] = useState(null);
+  const [personalWhiteboardStrokes, setPersonalWhiteboardStrokes] = useState([]);
+  const [personalDraftStroke, setPersonalDraftStroke] = useState(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushColor, setBrushColor] = useState(WHITEBOARD_COLORS[0]);
   const [brushWidth, setBrushWidth] = useState(3);
   const [boardSize, setBoardSize] = useState(WHITEBOARD_INITIAL_SIZE);
+  const [personalBoardSize, setPersonalBoardSize] = useState(WHITEBOARD_INITIAL_SIZE);
   const callRef = useRef(null);
   const previewVideoRef = useRef(null);
   const whiteboardRef = useRef(null);
@@ -119,11 +133,20 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const messagesEndRef = useRef(null);
   const customUnsubscribeRef = useRef(null);
   const draftStrokeRef = useRef(null);
+  const personalDraftStrokeRef = useRef(null);
 
   const updateDraftStroke = (updater) => {
     setDraftStroke((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       draftStrokeRef.current = next;
+      return next;
+    });
+  };
+
+  const updatePersonalDraftStroke = (updater) => {
+    setPersonalDraftStroke((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      personalDraftStrokeRef.current = next;
       return next;
     });
   };
@@ -140,7 +163,10 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       setChatInput('');
       setWhiteboardStrokes([]);
       setDraftStroke(null);
+      setPersonalWhiteboardStrokes([]);
+      setPersonalDraftStroke(null);
       draftStrokeRef.current = null;
+      personalDraftStrokeRef.current = null;
       setIsSidebarOpen(true);
       setActiveSidebarTab('chat');
       setActiveStageTab('meeting');
@@ -149,18 +175,22 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       setBrushColor(WHITEBOARD_COLORS[0]);
       setBrushWidth(3);
       setBoardSize(WHITEBOARD_INITIAL_SIZE);
+      setPersonalBoardSize(WHITEBOARD_INITIAL_SIZE);
     }
   }, [isOpen]);
+
+  const isPersonalWhiteboardOpen = showWhiteboardPopup && !isWhiteboardShared;
+  const activeBoardSize = isPersonalWhiteboardOpen ? personalBoardSize : boardSize;
 
   useEffect(() => {
     if (!showWhiteboardPopup) return;
     requestAnimationFrame(() => {
       const el = whiteboardScrollRef.current;
       if (!el) return;
-      el.scrollLeft = Math.max(0, (boardSize.width - el.clientWidth) / 2);
-      el.scrollTop = Math.max(0, (boardSize.height - el.clientHeight) / 2);
+      el.scrollLeft = Math.max(0, (activeBoardSize.width - el.clientWidth) / 2);
+      el.scrollTop = Math.max(0, (activeBoardSize.height - el.clientHeight) / 2);
     });
-  }, [showWhiteboardPopup]);
+  }, [showWhiteboardPopup, activeBoardSize.height, activeBoardSize.width]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -296,20 +326,33 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
   const appendWhiteboardStroke = (stroke) => {
     if (!stroke?.id || !stroke?.points?.length) return;
-    ensureBoardSizeForPoints(stroke.points);
+    ensureBoardSizeForPoints(stroke.points, 'shared');
     setWhiteboardStrokes((prev) => (prev.some((item) => item.id === stroke.id) ? prev : [...prev, stroke]));
   };
 
-  const ensureBoardSizeForPoints = (points = []) => {
+  const appendPersonalWhiteboardStroke = (stroke) => {
+    if (!stroke?.id || !stroke?.points?.length) return;
+    ensureBoardSizeForPoints(stroke.points, 'personal');
+    setPersonalWhiteboardStrokes((prev) => (prev.some((item) => item.id === stroke.id) ? prev : [...prev, stroke]));
+  };
+
+  const ensureBoardSizeForPoints = (points = [], scope = 'shared') => {
     if (!points.length) return;
 
     const maxX = Math.max(...points.map((point) => point.x));
     const maxY = Math.max(...points.map((point) => point.y));
 
-    setBoardSize((prev) => ({
+    const updateSize = (prev) => ({
       width: maxX > prev.width - WHITEBOARD_EDGE_PADDING ? prev.width + WHITEBOARD_EXPAND_STEP : prev.width,
       height: maxY > prev.height - WHITEBOARD_EDGE_PADDING ? prev.height + WHITEBOARD_EXPAND_STEP : prev.height,
-    }));
+    });
+
+    if (scope === 'personal') {
+      setPersonalBoardSize(updateSize);
+      return;
+    }
+
+    setBoardSize(updateSize);
   };
 
   const registerCustomEventHandlers = (activeCall) => {
@@ -333,6 +376,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       if (custom.type === WHITEBOARD_CLEAR_EVENT && custom.userId !== user?._id) {
         setWhiteboardStrokes([]);
         setDraftStroke(null);
+        draftStrokeRef.current = null;
       }
 
       if (custom.type === WHITEBOARD_VISIBILITY_EVENT) {
@@ -341,7 +385,6 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
         if (shouldShowWhiteboard) {
           setActiveStageTab('whiteboard');
         } else {
-          setShowWhiteboardPopup(false);
           setActiveStageTab((current) => (current === 'whiteboard' ? 'meeting' : current));
         }
       }
@@ -571,14 +614,21 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
     event.currentTarget.setPointerCapture?.(event.pointerId);
     setIsDrawing(true);
-    updateDraftStroke({
+    const nextStroke = {
       id: createEventId(),
       userId: user._id,
       userName: user.fullName,
       color: brushColor,
       width: brushWidth,
       points: [point],
-    });
+    };
+
+    if (isPersonalWhiteboardOpen) {
+      updatePersonalDraftStroke(nextStroke);
+      return;
+    }
+
+    updateDraftStroke(nextStroke);
   };
 
   const continueDrawing = (event) => {
@@ -586,9 +636,9 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     const point = getBoardPoint(event);
     if (!point) return;
 
-    ensureBoardSizeForPoints([point]);
+    ensureBoardSizeForPoints([point], isPersonalWhiteboardOpen ? 'personal' : 'shared');
 
-    updateDraftStroke((prev) => {
+    const updater = (prev) => {
       if (!prev) return prev;
       const last = prev.points[prev.points.length - 1];
       if (last && Math.abs(last.x - point.x) < 0.0025 && Math.abs(last.y - point.y) < 0.0025) {
@@ -598,17 +648,34 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
         ...prev,
         points: [...prev.points, point],
       };
-    });
+    };
+
+    if (isPersonalWhiteboardOpen) {
+      updatePersonalDraftStroke(updater);
+      return;
+    }
+
+    updateDraftStroke(updater);
   };
 
   const stopDrawing = async () => {
     if (!isDrawing) return;
     setIsDrawing(false);
 
-    const stroke = draftStrokeRef.current;
+    const stroke = isPersonalWhiteboardOpen ? personalDraftStrokeRef.current : draftStrokeRef.current;
 
     if (!stroke?.points?.length) {
-      updateDraftStroke(null);
+      if (isPersonalWhiteboardOpen) {
+        updatePersonalDraftStroke(null);
+      } else {
+        updateDraftStroke(null);
+      }
+      return;
+    }
+
+    if (isPersonalWhiteboardOpen) {
+      appendPersonalWhiteboardStroke(stroke);
+      updatePersonalDraftStroke(null);
       return;
     }
 
@@ -625,8 +692,16 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   };
 
   const clearWhiteboard = async () => {
+    if (isPersonalWhiteboardOpen) {
+      setPersonalWhiteboardStrokes([]);
+      updatePersonalDraftStroke(null);
+      setPersonalBoardSize(WHITEBOARD_INITIAL_SIZE);
+      return;
+    }
+
     setWhiteboardStrokes([]);
     updateDraftStroke(null);
+    setBoardSize(WHITEBOARD_INITIAL_SIZE);
     try {
       await sendCustomCallEvent({ type: WHITEBOARD_CLEAR_EVENT, userId: user._id });
     } catch (error) {
@@ -654,7 +729,6 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
   const stopWhiteboardShare = async () => {
     setIsWhiteboardShared(false);
-    setShowWhiteboardPopup(false);
     setActiveStageTab((current) => (current === 'whiteboard' ? 'meeting' : current));
 
     try {
@@ -674,17 +748,64 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     () => (draftStroke ? [...whiteboardStrokes, draftStroke] : whiteboardStrokes),
     [draftStroke, whiteboardStrokes]
   );
+  const personalRenderedStrokes = useMemo(
+    () => (personalDraftStroke ? [...personalWhiteboardStrokes, personalDraftStroke] : personalWhiteboardStrokes),
+    [personalDraftStroke, personalWhiteboardStrokes]
+  );
+
+  const popupBoardTitle = isWhiteboardShared ? 'Collaborative whiteboard' : 'Personal whiteboard';
+  const popupBoardDescription = isWhiteboardShared
+    ? 'Draw, scroll, and expand the board as your discussion grows.'
+    : 'Sketch privately, capture ideas, and keep notes without sharing them to the meeting.';
+  const activeRenderedStrokes = isPersonalWhiteboardOpen ? personalRenderedStrokes : renderedStrokes;
 
   const workspaceLabel = user?.organization?.name || 'Organization Platform';
   const sessionLabel = participantNames.length ? participantNames.join(', ') : 'Call Session';
   const meetingRoster = useMemo(() => {
-    const names = Array.from(new Set([user?.fullName, ...participantNames].filter(Boolean)));
-    return names.map((name, index) => ({
-      id: participantIds[index] || `${name}-${index}`,
-      name,
-      isYou: name === user?.fullName,
+    const profileMap = new Map();
+
+    participantProfiles.forEach((profile, index) => {
+      const profileId = profile?.id || participantIds[index] || profile?.name;
+      if (!profileId) return;
+      profileMap.set(profileId, {
+        id: profileId,
+        name: profile?.name || participantNames[index] || profileId,
+        image: profile?.image || '',
+      });
+    });
+
+    if (user?._id) {
+      profileMap.set(user._id, {
+        id: user._id,
+        name: user.fullName,
+        image: user.profilePic || '',
+      });
+    }
+
+    participantIds.forEach((id, index) => {
+      if (!id || profileMap.has(id)) return;
+      profileMap.set(id, {
+        id,
+        name: participantNames[index] || id,
+        image: '',
+      });
+    });
+
+    participantNames.forEach((name, index) => {
+      const fallbackId = participantIds[index] || `${name}-${index}`;
+      if (!name || profileMap.has(fallbackId)) return;
+      profileMap.set(fallbackId, {
+        id: fallbackId,
+        name,
+        image: '',
+      });
+    });
+
+    return Array.from(profileMap.values()).map((member) => ({
+      ...member,
+      isYou: member.id === user?._id || member.name === user?.fullName,
     }));
-  }, [participantIds, participantNames, user?.fullName]);
+  }, [participantIds, participantNames, participantProfiles, user?._id, user?.fullName, user?.profilePic]);
 
   if (!isOpen) return null;
 
@@ -899,16 +1020,14 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
                         <button
                           onClick={() => {
-                            if (!isWhiteboardShared) {
-                              shareWhiteboard();
-                              return;
-                            }
-                            setActiveStageTab('whiteboard');
                             setShowWhiteboardPopup(true);
+                            if (isWhiteboardShared) {
+                              setActiveStageTab('whiteboard');
+                            }
                           }}
-                          className={`btn btn-sm gap-2 ${isWhiteboardShared ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
+                          className={`btn btn-sm gap-2 ${showWhiteboardPopup ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
                         >
-                          <PenToolIcon className="size-4" /> {isWhiteboardShared ? 'Open whiteboard' : 'Share whiteboard'}
+                          <PenToolIcon className="size-4" /> {isWhiteboardShared ? 'Open whiteboard' : 'Personal board'}
                         </button>
 
                         <button onClick={leaveCurrentCall} className="btn btn-error btn-sm gap-2">
@@ -921,7 +1040,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                       {meetingRoster.map((member) => (
                         <div key={member.id} className="min-w-[132px] rounded-2xl border border-base-300 bg-base-100 p-2 shadow-sm">
                           <div className="flex items-center gap-2">
-                            <Avatar name={member.name} size="w-10 h-10" />
+                            <Avatar src={member.image} name={member.name} size="w-10 h-10" />
                             <div className="min-w-0">
                               <p className="truncate text-sm font-semibold">{member.isYou ? 'You' : member.name}</p>
                               <p className="text-[11px] text-base-content/50">{member.isYou ? 'Local preview' : 'In meeting'}</p>
@@ -1007,7 +1126,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                             <div className="space-y-3">
                               {meetingRoster.map((member, index) => (
                                 <div key={`${member.id}-${index}`} className="flex items-center gap-3 rounded-2xl border border-base-300 bg-base-100 px-3 py-3 shadow-sm">
-                                  <Avatar name={member.name} size="w-10 h-10" />
+                                  <Avatar src={member.image} name={member.name} size="w-10 h-10" />
                                   <div className="min-w-0 flex-1">
                                     <p className="truncate text-sm font-semibold">{member.isYou ? 'You' : member.name}</p>
                                     <p className="text-xs text-base-content/50">{member.isYou ? 'Organizer view' : 'Connected participant'}</p>
@@ -1022,14 +1141,14 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                 )}
               </div>
 
-              {showWhiteboardPopup && isWhiteboardShared && (
+              {showWhiteboardPopup && (
                 <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/55 p-2 sm:p-6">
                   <div className="flex h-full max-h-[95vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-base-300 bg-base-100 shadow-2xl">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-base-200 px-4 py-4 sm:px-5">
                       <div>
-                        <div className="badge badge-outline mb-2">Collaborative whiteboard</div>
+                        <div className="badge badge-outline mb-2">{popupBoardTitle}</div>
                         <h3 className="text-lg font-bold text-base-content">Infinite-style workspace</h3>
-                        <p className="text-sm text-base-content/55">Draw, scroll, and expand the board as your discussion grows.</p>
+                        <p className="text-sm text-base-content/55">{popupBoardDescription}</p>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
@@ -1056,6 +1175,11 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                         <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm gap-2 text-error">
                           <Trash2Icon className="size-4" /> Clear
                         </button>
+                        {!isWhiteboardShared && (
+                          <button onClick={shareWhiteboard} className="btn btn-primary btn-sm gap-2">
+                            <PenToolIcon className="size-4" /> Share to meeting
+                          </button>
+                        )}
                         <button onClick={() => setShowWhiteboardPopup(false)} className="btn btn-primary btn-sm gap-2">
                           <XIcon className="size-4" /> Close
                         </button>
@@ -1063,21 +1187,23 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                     </div>
 
                     <div className="border-b border-base-200 px-4 py-3 text-sm text-base-content/55 sm:px-5">
-                      Scroll in any direction and keep drawing. The board expands automatically when you approach an edge.
+                      {isWhiteboardShared
+                        ? 'Scroll in any direction and keep drawing. The board expands automatically when you approach an edge.'
+                        : 'Your personal board stays private until you decide to share it with the meeting.'}
                     </div>
 
                     <div ref={whiteboardScrollRef} className="min-h-0 flex-1 overflow-auto bg-base-200/60 p-4 sm:p-6">
                       <div
                         ref={whiteboardRef}
                         className="relative rounded-3xl border border-base-300 bg-white shadow-inner touch-none"
-                        style={{ width: `${boardSize.width}px`, height: `${boardSize.height}px` }}
+                        style={{ width: `${activeBoardSize.width}px`, height: `${activeBoardSize.height}px` }}
                         onPointerDown={startDrawing}
                         onPointerMove={continueDrawing}
                         onPointerUp={stopDrawing}
                         onPointerLeave={stopDrawing}
                       >
                         <svg className="pointer-events-none absolute inset-0 h-full w-full">
-                          {renderedStrokes.map((stroke) => (
+                          {activeRenderedStrokes.map((stroke) => (
                             <path
                               key={stroke.id}
                               d={pointsToSvgPath(stroke.points)}
@@ -1090,11 +1216,11 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                           ))}
                         </svg>
 
-                        {renderedStrokes.length === 0 && (
+                        {activeRenderedStrokes.length === 0 && (
                           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-center text-base-content/35">
                             <div>
                               <PenToolIcon className="mx-auto mb-3 size-10" />
-                              <p className="font-medium">Start drawing on the whiteboard</p>
+                              <p className="font-medium">{isWhiteboardShared ? 'Start drawing on the whiteboard' : 'Start sketching on your private board'}</p>
                               <p className="mt-1 text-sm">Open more space just by drawing toward the edges.</p>
                             </div>
                           </div>

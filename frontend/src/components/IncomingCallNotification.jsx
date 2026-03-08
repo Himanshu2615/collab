@@ -1,5 +1,6 @@
-import { PhoneIcon, SmartphoneIcon, VideoIcon, Volume2Icon, XIcon, UserIcon } from 'lucide-react';
+import { PhoneIcon, SmartphoneIcon, VideoIcon, Volume2Icon, XIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import Avatar from './Avatar';
 
 const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, callerImage, callType = 'video', ringtoneVolume = 0.6, vibrate = true }) => {
   const [ringingTime, setRingingTime] = useState(0);
@@ -74,13 +75,7 @@ const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, cal
           <div className="relative mx-auto mb-6">
             <div className="avatar online">
               <div className="w-32 rounded-full ring-4 ring-primary ring-offset-4 ring-offset-base-100 animate-pulse">
-                {callerImage ? (
-                  <img src={callerImage} alt={callerName} />
-                ) : (
-                  <div className="bg-primary/20 flex items-center justify-center">
-                    <UserIcon className="size-16 text-primary" />
-                  </div>
-                )}
+                <Avatar src={callerImage} name={callerName} size="w-32 h-32" className="ring-0 shadow-none" />
               </div>
             </div>
             {/* Ripple effect */}

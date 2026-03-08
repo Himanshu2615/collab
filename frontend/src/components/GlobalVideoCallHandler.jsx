@@ -63,6 +63,11 @@ const GlobalVideoCallHandler = () => {
     const participantNames = members
       .map((m) => m.user?.name || m.user_id)
       .filter((name) => name && name !== authUser.fullName);
+    const participantProfiles = members.map((member) => ({
+      id: member.user_id,
+      name: member.user?.name || member.user_id,
+      image: member.user?.image || member.user?.profilePic || '',
+    }));
 
     return {
       callId,
@@ -73,6 +78,7 @@ const GlobalVideoCallHandler = () => {
       callerUserId,
       participantIds,
       participantNames,
+      participantProfiles,
       startedAt: event.created_at || new Date().toISOString(),
     };
   };
@@ -204,6 +210,7 @@ const GlobalVideoCallHandler = () => {
       participantNames: accepted.participantNames?.length
         ? accepted.participantNames
         : [accepted.callerName],
+      participantProfiles: accepted.participantProfiles || [],
       callType: accepted.type || 'video',
     });
     setShowVideoCall(true);
@@ -272,6 +279,7 @@ const GlobalVideoCallHandler = () => {
           isInitiator={false}
           participantIds={callInfo.participantIds}
           participantNames={callInfo.participantNames}
+          participantProfiles={callInfo.participantProfiles}
           callType={callInfo.callType}
         />
       )}
