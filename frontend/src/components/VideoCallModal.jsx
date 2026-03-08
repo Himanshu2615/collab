@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StreamVideoClient, StreamCall, StreamVideo, SpeakerLayout } from '@stream-io/video-react-sdk';
+import { StreamVideoClient, StreamCall, StreamVideo, SpeakerLayout, useCallStateHooks } from '@stream-io/video-react-sdk';
 import {
   DownloadIcon,
   InfoIcon,
@@ -26,6 +26,7 @@ const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 const CALL_CHAT_EVENT = 'bizzcolab.call.chat';
 const WHITEBOARD_STROKE_EVENT = 'bizzcolab.call.whiteboard.stroke';
 const WHITEBOARD_CLEAR_EVENT = 'bizzcolab.call.whiteboard.clear';
+const WHITEBOARD_VISIBILITY_EVENT = 'bizzcolab.call.whiteboard.visibility';
 const WHITEBOARD_COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f97316', '#ef4444', '#111827'];
 const WHITEBOARD_INITIAL_SIZE = { width: 3200, height: 2200 };
 const WHITEBOARD_EXPAND_STEP = 800;
@@ -44,6 +45,41 @@ const getOrgSlug = (user) => {
   if (!user?.organization) return null;
   if (typeof user.organization === 'object') return user.organization.slug || null;
   return null;
+};
+
+const InCallScreenShareButton = () => {
+  const { useHasOngoingScreenShare, useScreenShareState } = useCallStateHooks();
+  const isSomeoneScreenSharing = useHasOngoingScreenShare();
+  const { screenShare, optionsAwareIsMute, isTogglePending } = useScreenShareState({
+    optimisticUpdates: true,
+  });
+
+  const isSharingScreen = !optionsAwareIsMute;
+  const isDisabled = isTogglePending || (!isSharingScreen && isSomeoneScreenSharing);
+  const label = isSharingScreen ? 'Stop sharing' : isSomeoneScreenSharing ? 'Screen live' : 'Share screen';
+
+  const handleToggle = async () => {
+    if (isDisabled) return;
+
+    try {
+      await screenShare.toggle();
+    } catch (error) {
+      console.error('Screen share toggle error:', error);
+      toast.error('Could not update screen sharing');
+    }
+  };
+
+  return (
+    <button
+      onClick={handleToggle}
+      disabled={isDisabled}
+      className={`btn btn-sm gap-2 ${isSharingScreen ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'} ${isDisabled ? 'btn-disabled' : ''}`}
+      title={isSomeoneScreenSharing && !isSharingScreen ? 'Another participant is already sharing' : 'Share your screen'}
+    >
+      <MonitorUpIcon className="size-4" />
+      {label}
+    </button>
+  );
 };
 
 const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, participantIds = [], participantNames = [], callType = 'video' }) => {
@@ -65,7 +101,8 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const [selectedSpeakerId, setSelectedSpeakerId] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeSidebarTab, setActiveSidebarTab] = useState('chat');
-  const [activeStageTab, setActiveStageTab] = useState('whiteboard');
+  const [activeStageTab, setActiveStageTab] = useState('meeting');
+  const [isWhiteboardShared, setIsWhiteboardShared] = useState(false);
   const [showWhiteboardPopup, setShowWhiteboardPopup] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
@@ -106,7 +143,8 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       draftStrokeRef.current = null;
       setIsSidebarOpen(true);
       setActiveSidebarTab('chat');
-      setActiveStageTab('whiteboard');
+      setActiveStageTab('meeting');
+      setIsWhiteboardShared(false);
       setShowWhiteboardPopup(false);
       setBrushColor(WHITEBOARD_COLORS[0]);
       setBrushWidth(3);
@@ -295,6 +333,17 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       if (custom.type === WHITEBOARD_CLEAR_EVENT && custom.userId !== user?._id) {
         setWhiteboardStrokes([]);
         setDraftStroke(null);
+      }
+
+      if (custom.type === WHITEBOARD_VISIBILITY_EVENT) {
+        const shouldShowWhiteboard = Boolean(custom.shared);
+        setIsWhiteboardShared(shouldShowWhiteboard);
+        if (shouldShowWhiteboard) {
+          setActiveStageTab('whiteboard');
+        } else {
+          setShowWhiteboardPopup(false);
+          setActiveStageTab((current) => (current === 'whiteboard' ? 'meeting' : current));
+        }
       }
     });
   };
@@ -586,6 +635,41 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     }
   };
 
+  const shareWhiteboard = async () => {
+    setIsWhiteboardShared(true);
+    setActiveStageTab('whiteboard');
+
+    try {
+      await sendCustomCallEvent({
+        type: WHITEBOARD_VISIBILITY_EVENT,
+        shared: true,
+        userId: user._id,
+      });
+      toast.success('Whiteboard shared with the meeting');
+    } catch (error) {
+      console.error('Whiteboard share sync error:', error);
+      toast.error('Failed to share whiteboard');
+    }
+  };
+
+  const stopWhiteboardShare = async () => {
+    setIsWhiteboardShared(false);
+    setShowWhiteboardPopup(false);
+    setActiveStageTab((current) => (current === 'whiteboard' ? 'meeting' : current));
+
+    try {
+      await sendCustomCallEvent({
+        type: WHITEBOARD_VISIBILITY_EVENT,
+        shared: false,
+        userId: user._id,
+      });
+      toast.success('Whiteboard hidden from the meeting');
+    } catch (error) {
+      console.error('Whiteboard hide sync error:', error);
+      toast.error('Failed to update whiteboard sharing');
+    }
+  };
+
   const renderedStrokes = useMemo(
     () => (draftStroke ? [...whiteboardStrokes, draftStroke] : whiteboardStrokes),
     [draftStroke, whiteboardStrokes]
@@ -641,21 +725,32 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                     <div className="flex items-center justify-between rounded-t-2xl border border-b-0 border-base-300 bg-base-100 px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => setActiveStageTab('whiteboard')}
-                          className={`btn btn-sm gap-2 ${activeStageTab === 'whiteboard' ? 'btn-primary' : 'btn-ghost'}`}
-                        >
-                          <PenToolIcon className="size-4" /> Shared Whiteboard
-                        </button>
-                        <button
                           onClick={() => setActiveStageTab('meeting')}
                           className={`btn btn-sm gap-2 ${activeStageTab === 'meeting' ? 'btn-primary' : 'btn-ghost'}`}
                         >
                           <MonitorUpIcon className="size-4" /> Meeting Stage
                         </button>
+                        <button
+                          onClick={() => isWhiteboardShared && setActiveStageTab('whiteboard')}
+                          disabled={!isWhiteboardShared}
+                          className={`btn btn-sm gap-2 ${activeStageTab === 'whiteboard' ? 'btn-primary' : 'btn-ghost'} ${!isWhiteboardShared ? 'btn-disabled' : ''}`}
+                        >
+                          <PenToolIcon className="size-4" /> {isWhiteboardShared ? 'Shared Whiteboard' : 'Whiteboard on demand'}
+                        </button>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {activeStageTab === 'whiteboard' && (
+                        {isWhiteboardShared ? (
+                          <button onClick={stopWhiteboardShare} className="btn btn-ghost btn-sm gap-2 text-error">
+                            <PenToolIcon className="size-4" /> Stop whiteboard
+                          </button>
+                        ) : (
+                          <button onClick={shareWhiteboard} className="btn btn-primary btn-sm gap-2">
+                            <PenToolIcon className="size-4" /> Share whiteboard
+                          </button>
+                        )}
+
+                        {isWhiteboardShared && activeStageTab === 'whiteboard' && (
                           <>
                             <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm btn-square" title="Clear whiteboard">
                               <Trash2Icon className="size-4" />
@@ -738,11 +833,14 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                         )
                       ) : (
                         <div className="relative h-full overflow-hidden bg-slate-950">
+                          <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs font-medium text-white/80 backdrop-blur-md">
+                            Normal meeting view{isWhiteboardShared ? ' • Whiteboard ready when needed' : ' • Share a whiteboard or screen when you need it'}
+                          </div>
                           <SpeakerLayout />
                         </div>
                       )}
 
-                      {activeStageTab === 'whiteboard' && callType === 'video' && (
+                      {isWhiteboardShared && activeStageTab === 'whiteboard' && callType === 'video' && (
                         <div className="absolute bottom-4 right-4 h-24 w-40 overflow-hidden rounded-2xl border border-white/15 bg-slate-950 shadow-xl">
                           <SpeakerLayout />
                         </div>
@@ -797,11 +895,20 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                           <UsersIcon className="size-4" /> Participants
                         </button>
 
+                        <InCallScreenShareButton />
+
                         <button
-                          onClick={() => setShowWhiteboardPopup(true)}
-                          className={`btn btn-sm gap-2 ${showWhiteboardPopup ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
+                          onClick={() => {
+                            if (!isWhiteboardShared) {
+                              shareWhiteboard();
+                              return;
+                            }
+                            setActiveStageTab('whiteboard');
+                            setShowWhiteboardPopup(true);
+                          }}
+                          className={`btn btn-sm gap-2 ${isWhiteboardShared ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
                         >
-                          <PenToolIcon className="size-4" /> Pop out board
+                          <PenToolIcon className="size-4" /> {isWhiteboardShared ? 'Open whiteboard' : 'Share whiteboard'}
                         </button>
 
                         <button onClick={leaveCurrentCall} className="btn btn-error btn-sm gap-2">
@@ -915,7 +1022,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                 )}
               </div>
 
-              {showWhiteboardPopup && (
+              {showWhiteboardPopup && isWhiteboardShared && (
                 <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/55 p-2 sm:p-6">
                   <div className="flex h-full max-h-[95vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-base-300 bg-base-100 shadow-2xl">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-base-200 px-4 py-4 sm:px-5">
@@ -1057,7 +1164,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                   </div>
                   <div className="rounded-2xl bg-base-200 px-4 py-3">
                     <p className="text-xs uppercase tracking-wide text-base-content/50">Meeting tools</p>
-                    <p className="mt-1 text-sm font-medium text-base-content">Live chat, whiteboard, recording, microphone control, camera control</p>
+                    <p className="mt-1 text-sm font-medium text-base-content">Live chat, whiteboard on demand, screen sharing, recording, microphone control, camera control</p>
                   </div>
                   <div className="rounded-2xl bg-base-200 px-4 py-3 space-y-3">
                     <p className="text-xs uppercase tracking-wide text-base-content/50">Devices</p>
