@@ -31,9 +31,9 @@ const SlackMessage = () => {
         EditMessageInput,
         groupStyles,
         handleDelete,
-        handleEdit,
         handleReaction,
         onUserClick,
+        setEditingState,
     } = useMessageContext();
 
     const { handleQuotedMessageChange } = useChannelActionContext();
@@ -357,7 +357,9 @@ const SlackMessage = () => {
                                         type="button"
                                         className="w-full px-4 py-2 text-left text-sm hover:bg-base-200 transition-colors"
                                         onClick={(event) => {
-                                            handleEdit(event);
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            setEditingState(event);
                                             setShowActions(false);
                                         }}
                                     >

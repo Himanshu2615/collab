@@ -1,16 +1,20 @@
 import { useState, useEffect } from "react";
 import { XIcon, UsersIcon } from "lucide-react";
 import Avatar from "./Avatar";
+import { useStreamContext } from "../context/StreamContext";
+import { getPresenceMeta } from "../lib/presenceUtils";
 
 const ChannelMembersPanel = ({ channel, isOpen, onClose }) => {
   const [members, setMembers] = useState([]);
+  const { getUserPresence, refreshUserPresence } = useStreamContext();
 
   useEffect(() => {
     if (channel && isOpen) {
       const membersList = Object.values(channel.state.members || {});
       setMembers(membersList);
+      refreshUserPresence(membersList.map((member) => member.user_id).filter(Boolean));
     }
-  }, [channel, isOpen]);
+  }, [channel, isOpen, refreshUserPresence]);
 
   if (!isOpen) return null;
 
@@ -36,22 +40,26 @@ const ChannelMembersPanel = ({ channel, isOpen, onClose }) => {
         </div>
 
         <div className="overflow-y-auto max-h-[calc(80vh-100px)] p-6 space-y-3">
-          {members.map((member) => (
+          {members.map((member) => {
+            const presenceUser = getUserPresence(member.user_id, member.user);
+            const presenceMeta = getPresenceMeta(presenceUser);
+
+            return (
             <div 
               key={member.user_id} 
               className="flex items-center gap-3 p-3 rounded-lg hover:bg-base-200 transition-colors"
             >
               <Avatar
-                src={member.user?.image}
-                name={member.user?.name}
+                src={presenceUser?.image || member.user?.image}
+                name={presenceUser?.name || member.user?.name}
                 size="w-12 h-12"
                 className="ring ring-primary/10 ring-offset-base-100 ring-offset-2"
               />
               <div className="flex-1">
-                <h4 className="font-bold">{member.user?.name}</h4>
-                <p className="text-xs text-success flex items-center gap-1">
-                  <span className="size-2 rounded-full bg-success inline-block" />
-                  Active
+                <h4 className="font-bold">{presenceUser?.name || member.user?.name}</h4>
+                <p className={`text-xs flex items-center gap-1 ${presenceMeta.textClassName}`}>
+                  <span className={`size-2 rounded-full inline-block ${presenceMeta.dotClassName}`} />
+                  {presenceMeta.label}
                 </p>
               </div>
               {member.role === "owner" && (
@@ -61,7 +69,7 @@ const ChannelMembersPanel = ({ channel, isOpen, onClose }) => {
                 <span className="badge badge-secondary badge-sm">Admin</span>
               )}
             </div>
-          ))}
+          )})}
         </div>
       </div>
     </div>

@@ -5,10 +5,15 @@ import { MessageSquareIcon, UserRoundIcon } from "lucide-react";
 import Avatar from "./Avatar";
 import ContactCard from "./ContactCard";
 import useAuthUser from "../hooks/useAuthUser";
+import { useStreamContext } from "../context/StreamContext";
+import { getPresenceMeta } from "../lib/presenceUtils";
 
 const FriendCard = ({ friend }) => {
   const { authUser } = useAuthUser();
+  const { getUserPresence } = useStreamContext();
   const [showCard, setShowCard] = useState(false);
+  const presenceUser = getUserPresence(friend._id, friend);
+  const presenceMeta = getPresenceMeta(presenceUser);
 
   return (
     <>
@@ -22,14 +27,14 @@ const FriendCard = ({ friend }) => {
               title="View profile"
             >
               <Avatar
-                src={friend.profilePic}
-                name={friend.fullName}
+                src={presenceUser?.profilePic || friend.profilePic}
+                name={presenceUser?.fullName || friend.fullName}
                 size="w-12 h-12"
                 rounded="rounded-xl"
                 className="ring ring-primary/10 ring-offset-base-100 ring-offset-2"
               />
             </button>
-            <div className="badge badge-success badge-xs">Online</div>
+            <div className={`badge badge-xs ${presenceMeta.isOnline ? "badge-success" : "badge-ghost"}`}>{presenceMeta.label}</div>
           </div>
 
           <div className="mt-4">
@@ -38,7 +43,7 @@ const FriendCard = ({ friend }) => {
               onClick={() => setShowCard(true)}
               className="text-left font-bold text-lg group-hover:text-primary transition-colors w-full"
             >
-              {friend.fullName}
+              {presenceUser?.fullName || friend.fullName}
             </button>
             {(friend.location || friend.nativeLanguage) && (
               <p className="text-xs text-base-content/50 mb-4 capitalize">
@@ -80,7 +85,7 @@ const FriendCard = ({ friend }) => {
 
       {showCard && (
         <ContactCard
-          user={friend}
+          user={presenceUser || friend}
           selfId={authUser?._id}
           onClose={() => setShowCard(false)}
         />

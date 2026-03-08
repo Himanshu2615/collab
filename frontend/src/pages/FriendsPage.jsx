@@ -3,15 +3,17 @@ import { getOrgMembers, getUserFriends, lookupUserById, sendFriendRequest } from
 import FriendCard from "../components/FriendCard";
 import NoFriendsFound from "../components/NoFriendsFound";
 import { UsersIcon, SearchIcon, UserPlusIcon, CheckCircleIcon, HashIcon, HeartIcon, Building2Icon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import Avatar from "../components/Avatar";
+import { useStreamContext } from "../context/StreamContext";
 
 const FriendsPage = () => {
   const [search, setSearch] = useState("");
   const [lookupId, setLookupId] = useState("");
   const [lookupResult, setLookupResult] = useState(null);
   const queryClient = useQueryClient();
+  const { refreshUserPresence } = useStreamContext();
 
   const { data: membersData, isLoading: membersLoading } = useQuery({
     queryKey: ["orgMembers"],
@@ -74,6 +76,14 @@ const FriendsPage = () => {
   const filteredFriends = filterPeople(myFriends);
   const filteredTeamMembers = filterPeople(teamMembers);
   const isLoading = membersLoading || friendsLoading;
+
+  useEffect(() => {
+    refreshUserPresence([
+      ...myFriends.map((friend) => friend._id),
+      ...teamMembers.map((member) => member._id),
+      lookupResult?.user?._id,
+    ].filter(Boolean));
+  }, [lookupResult?.user?._id, myFriends, refreshUserPresence, teamMembers]);
 
   return (
     <div className="p-4 sm:p-8 min-h-screen bg-base-100">

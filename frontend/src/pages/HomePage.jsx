@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link } from "react-router";
 import {
   BellIcon,
@@ -15,6 +16,8 @@ import {
 import useAuthUser from "../hooks/useAuthUser";
 import useDashboardSummary from "../hooks/useDashboardSummary";
 import Avatar from "../components/Avatar";
+import { useStreamContext } from "../context/StreamContext";
+import { getPresenceMeta } from "../lib/presenceUtils";
 
 const getGreeting = () => {
   const h = new Date().getHours();
@@ -104,6 +107,7 @@ const getNewsTone = (type) => {
 
 const HomePage = () => {
   const { authUser } = useAuthUser();
+  const { getUserPresence, refreshUserPresence } = useStreamContext();
   const firstName = authUser?.fullName?.split(" ")[0] ?? "there";
 
   const { data: dashboardData, isLoading: dashboardLoading } = useDashboardSummary();
@@ -118,6 +122,10 @@ const HomePage = () => {
     ...incomingReqs.map((req) => ({ ...req, _ntype: "request" })),
     ...acceptedReqs.map((req) => ({ ...req, _ntype: "accepted" })),
   ].slice(0, 4);
+
+  useEffect(() => {
+    refreshUserPresence(members.map((member) => member._id).filter(Boolean));
+  }, [members, refreshUserPresence]);
 
   return (
     <div className="min-h-screen bg-base-200/60 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
@@ -393,27 +401,29 @@ const HomePage = () => {
                       isMeetingNow(meeting) &&
                       meeting.participants?.some?.((participant) => participant?._id === member._id || participant === member._id)
                   );
+                  const presenceUser = getUserPresence(member._id, member);
+                  const presenceMeta = getPresenceMeta(presenceUser);
 
                   return (
                     <div key={member._id} className="flex items-center gap-3 rounded-2xl px-2 py-2.5 transition hover:bg-base-200/50">
                       <div className="relative shrink-0">
                         <Avatar
-                          src={member.profilePic}
-                          name={member.fullName}
+                          src={presenceUser?.profilePic || member.profilePic}
+                          name={presenceUser?.fullName || member.fullName}
                           size="w-11 h-11"
                           rounded="rounded-full"
                         />
                         <span
                           className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-base-100 ${
-                            inMeeting ? "bg-warning" : "bg-success"
+                            inMeeting ? "bg-warning" : presenceMeta.dotClassName
                           }`}
                         />
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-base-content">{member.fullName}</p>
+                        <p className="truncate text-sm font-semibold text-base-content">{presenceUser?.fullName || member.fullName}</p>
                         <p className="mt-0.5 text-[11px] font-bold uppercase tracking-wide text-base-content/35">
-                          {inMeeting ? "In meeting" : "Active now"}
+                          {inMeeting ? "In meeting" : presenceMeta.label}
                         </p>
                       </div>
 

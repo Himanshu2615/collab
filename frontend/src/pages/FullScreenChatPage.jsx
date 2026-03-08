@@ -8,6 +8,7 @@ import Avatar from "../components/Avatar";
 import { setUserImageCache, getUserImage } from "../lib/userImageCache";
 import { useStreamContext } from "../context/StreamContext";
 import { getActiveCallByConversation, isCallOngoing, subscribeToCallStore } from "../lib/callHistory";
+import { getPresenceMeta } from "../lib/presenceUtils";
 
 import {
   Channel,
@@ -45,60 +46,6 @@ import SlackMessage from "../components/SlackMessage";
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 
-const getPresenceMeta = (user) => {
-  if (!user) {
-    return {
-      dotClassName: "bg-base-content/30",
-      label: "Offline",
-      textClassName: "text-base-content/55",
-    };
-  }
-
-  if (user.online) {
-    return {
-      dotClassName: "bg-success animate-pulse",
-      label: "Online",
-      textClassName: "text-success",
-    };
-  }
-
-  if (user.last_active) {
-    const lastActive = new Date(user.last_active);
-    const diffMinutes = Math.max(0, Math.floor((Date.now() - lastActive.getTime()) / 60000));
-
-    if (diffMinutes < 1) {
-      return {
-        dotClassName: "bg-success",
-        label: "Active just now",
-        textClassName: "text-success",
-      };
-    }
-
-    if (diffMinutes < 60) {
-      return {
-        dotClassName: "bg-base-content/30",
-        label: `Active ${diffMinutes}m ago`,
-        textClassName: "text-base-content/55",
-      };
-    }
-
-    const diffHours = Math.floor(diffMinutes / 60);
-    if (diffHours < 24) {
-      return {
-        dotClassName: "bg-base-content/30",
-        label: `Active ${diffHours}h ago`,
-        textClassName: "text-base-content/55",
-      };
-    }
-  }
-
-  return {
-    dotClassName: "bg-base-content/30",
-    label: "Offline",
-    textClassName: "text-base-content/55",
-  };
-};
-
 const FullScreenChatPage = () => {
   const { id: channelOrUserId } = useParams();
 
@@ -121,7 +68,7 @@ const FullScreenChatPage = () => {
   const [showCallLogs, setShowCallLogs] = useState(false);
 
   const { authUser } = useAuthUser();
-  const { markAsRead, isMessageMuted, isCallMuted } = useStreamContext();
+  const { markAsRead, isMessageMuted, isCallMuted, getUserPresence, refreshUserPresence } = useStreamContext();
 
   const { data: tokenData } = useQuery({
     queryKey: ["streamToken"],
@@ -275,6 +222,12 @@ const FullScreenChatPage = () => {
     return subscribeToCallStore(refresh);
   }, [conversationId]);
 
+  useEffect(() => {
+    const memberIds = Object.values(channel?.state?.members || {}).map((member) => member.user_id).filter(Boolean);
+    if (!memberIds.length) return;
+    refreshUserPresence(memberIds);
+  }, [channel?.id, channel?.state?.members, refreshUserPresence]);
+
   // Call timer
   useEffect(() => {
     let interval;
@@ -313,8 +266,11 @@ const FullScreenChatPage = () => {
       ? authUser.profilePic
       : (getUserImage(member.user_id) || member.user?.image || member.user?.profilePic || ""),
   }));
+  const dmPartnerMember = !isChannel
+    ? memberList.find((m) => m.user_id !== authUser._id)
+    : null;
   const dmPartner = !isChannel
-    ? memberList.find((m) => m.user_id !== authUser._id)?.user
+    ? getUserPresence(dmPartnerMember?.user_id, dmPartnerMember?.user)
     : null;
   const dmPartnerPresence = getPresenceMeta(dmPartner);
 
@@ -553,7 +509,7 @@ const FullScreenChatPage = () => {
                     Message={SlackMessage}
                     messageActions={["edit", "delete", "reply", "react", "quote"]}
                     messageLimit={50}
-                    hideDeletedMessages
+                    hideDeletedMessages={false}
                     disableDateSeparator={false}
                   />
 

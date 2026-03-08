@@ -7,6 +7,7 @@ import useAuthUser from "../hooks/useAuthUser";
 import Avatar from "../components/Avatar";
 import { isValidAvatarUrl } from "../lib/avatarUtils";
 import { setUserImageCache } from "../lib/userImageCache";
+import { mergePresenceUser } from "../lib/presenceUtils";
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 const StreamContext = createContext(null);
@@ -90,6 +91,7 @@ export const StreamProvider = ({ children }) => {
 
   /* dmMeta: { [partnerUserId]: { unread, lastMsg, lastMsgAt, lastMsgSenderId, channelId, partnerName, partnerImage } } */
   const [dmMeta, setDmMeta] = useState({});
+  const [presenceById, setPresenceById] = useState({});
   const cleanupRef = useRef(null);
   /* Keep stable refs for use inside event callbacks */
   const selfIdRef = useRef(null);
@@ -97,6 +99,65 @@ export const StreamProvider = ({ children }) => {
 
   const dmMetaRef = useRef(dmMeta);
   useEffect(() => { dmMetaRef.current = dmMeta; }, [dmMeta]);
+
+  const upsertPresenceUsers = useCallback((users = []) => {
+    if (!Array.isArray(users) || users.length === 0) return;
+
+    setPresenceById((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      users.forEach((user) => {
+        const userId = user?.id || user?._id;
+        if (!userId) return;
+
+        const merged = mergePresenceUser(prev[userId], {
+          ...user,
+          id: userId,
+          image: sanitizeStreamImage(user?.image) || user?.profilePic || "",
+        });
+
+        const prevSerialized = JSON.stringify(prev[userId] || null);
+        const nextSerialized = JSON.stringify(merged || null);
+        if (prevSerialized !== nextSerialized) {
+          next[userId] = merged;
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const getUserPresence = useCallback((userId, fallbackUser = null) => {
+    if (!userId && !fallbackUser) return null;
+    const key = userId || fallbackUser?._id || fallbackUser?.id;
+    return mergePresenceUser(fallbackUser, key ? presenceById[key] : null);
+  }, [presenceById]);
+
+  const refreshUserPresence = useCallback(async (userIds = []) => {
+    const ids = Array.from(new Set(userIds.filter(Boolean)));
+    if (!ids.length) return [];
+
+    try {
+      const StreamChat = await getStreamChatClass();
+      const client = StreamChat.getInstance(STREAM_API_KEY);
+      if (!client?.userID) return [];
+
+      const response = await client.queryUsers(
+        { id: { $in: ids } },
+        { last_active: -1 },
+        { limit: Math.max(ids.length, 10), presence: true }
+      );
+
+      const users = response?.users || [];
+      upsertPresenceUsers(users);
+      return users;
+    } catch (error) {
+      console.warn("[StreamContext] Failed to refresh presence:", error);
+      return [];
+    }
+  }, [upsertPresenceUsers]);
 
   /* ── Browser notification permission ───────────── */
   const [notifPermission, setNotifPermission] = useState(
@@ -321,6 +382,7 @@ export const StreamProvider = ({ children }) => {
 
         /* Cache own image so SlackMessage always resolves it */
         setUserImageCache(authUser._id, authUser.profilePic);
+  upsertPresenceUsers([{ id: authUser._id, name: authUser.fullName, image: img, online: true }]);
 
         if (!isMounted) return;
 
@@ -467,6 +529,19 @@ export const StreamProvider = ({ children }) => {
         client.on("notification.mark_read",    onMarkRead);
         client.on("notification.mark_unread",  onMarkUnread);
 
+        const onPresenceChanged = (event) => {
+          const changedUser = event.user || event.me || event.member?.user;
+          if (changedUser) upsertPresenceUsers([changedUser]);
+        };
+
+        const onUserUpdated = (event) => {
+          const updatedUser = event.user;
+          if (updatedUser) upsertPresenceUsers([updatedUser]);
+        };
+
+        client.on("user.presence.changed", onPresenceChanged);
+        client.on("user.updated", onUserUpdated);
+
         const seedExistingChannels = async () => {
           try {
             const channels = await client.queryChannels(
@@ -484,6 +559,7 @@ export const StreamProvider = ({ children }) => {
                 const members = Object.values(ch.state.members || {});
                 const partnerMember = members.find((m) => m.user_id !== authUser._id);
                 const partnerUser = partnerMember?.user;
+                if (partnerUser) upsertPresenceUsers([partnerUser]);
 
                 const last = typeof ch.lastMessage === "function"
                   ? ch.lastMessage()
@@ -532,6 +608,8 @@ export const StreamProvider = ({ children }) => {
           client.off("message.read",              onMarkRead);
           client.off("notification.mark_read",    onMarkRead);
           client.off("notification.mark_unread",  onMarkUnread);
+          client.off("user.presence.changed",     onPresenceChanged);
+          client.off("user.updated",              onUserUpdated);
         };
       } catch (err) {
         console.error("[StreamContext] setup error:", err);
@@ -583,7 +661,7 @@ export const StreamProvider = ({ children }) => {
   }, []);
 
   return (
-    <StreamContext.Provider value={{ dmMeta, markAsRead, notifPermission, requestNotifPermission, notificationPrefs, getConversationPrefs, isConversationMuted, isMessageMuted, isCallMuted, isMessageMutedLive, isCallMutedLive, toggleConversationMute, toggleNotificationMute, updateConversationCallSetting }}>
+    <StreamContext.Provider value={{ dmMeta, presenceById, getUserPresence, refreshUserPresence, markAsRead, notifPermission, requestNotifPermission, notificationPrefs, getConversationPrefs, isConversationMuted, isMessageMuted, isCallMuted, isMessageMutedLive, isCallMutedLive, toggleConversationMute, toggleNotificationMute, updateConversationCallSetting }}>
       {children}
     </StreamContext.Provider>
   );
@@ -592,6 +670,9 @@ export const StreamProvider = ({ children }) => {
 export const useStreamContext = () =>
   useContext(StreamContext) ?? {
     dmMeta: {},
+    presenceById: {},
+    getUserPresence: (_, fallbackUser = null) => fallbackUser,
+    refreshUserPresence: async () => [],
     markAsRead: () => {},
     notifPermission: "unsupported",
     requestNotifPermission: async () => {},

@@ -1,8 +1,11 @@
+import { useEffect } from "react";
 import { PhoneIcon, PhoneOffIcon, SmartphoneIcon, Volume2Icon, XIcon, HashIcon, BellIcon, BellOffIcon, PinIcon, SearchIcon } from "lucide-react";
 import { useStreamContext } from "../context/StreamContext";
+import Avatar from "./Avatar";
+import { getPresenceMeta } from "../lib/presenceUtils";
 
 const ChannelInfoPanel = ({ channel, isChannel, isOpen, onClose }) => {
-  const { getConversationPrefs, isMessageMuted, isCallMuted, toggleNotificationMute, updateConversationCallSetting } = useStreamContext();
+  const { getConversationPrefs, isMessageMuted, isCallMuted, toggleNotificationMute, updateConversationCallSetting, getUserPresence, refreshUserPresence } = useStreamContext();
 
   if (!isOpen) return null;
 
@@ -14,6 +17,13 @@ const ChannelInfoPanel = ({ channel, isChannel, isOpen, onClose }) => {
   const otherMember = !isChannel && channel?.state?.members 
     ? Object.values(channel.state.members).find(m => m.user_id !== channel._client?.userID)
     : null;
+  const otherMemberUser = getUserPresence(otherMember?.user_id, otherMember?.user);
+  const otherMemberPresence = getPresenceMeta(otherMemberUser);
+
+  useEffect(() => {
+    if (!isOpen || !otherMember?.user_id) return;
+    refreshUserPresence([otherMember.user_id]);
+  }, [isOpen, otherMember?.user_id, refreshUserPresence]);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
@@ -36,16 +46,17 @@ const ChannelInfoPanel = ({ channel, isChannel, isOpen, onClose }) => {
               </>
             ) : (
               <>
-                <div className="avatar">
-                  <div className="w-12 rounded-full ring ring-primary/10 ring-offset-base-100 ring-offset-2">
-                    <img src={otherMember?.user?.image} alt={otherMember?.user?.name} />
-                  </div>
-                </div>
+                <Avatar
+                  src={otherMemberUser?.image || otherMember?.user?.image}
+                  name={otherMemberUser?.name || otherMember?.user?.name}
+                  size="w-12 h-12"
+                  className="ring ring-primary/10 ring-offset-base-100 ring-offset-2"
+                />
                 <div>
-                  <h3 className="font-bold text-lg">{otherMember?.user?.name}</h3>
-                  <p className="text-xs text-success flex items-center gap-1">
-                    <span className="size-2 rounded-full bg-success inline-block" />
-                    Active
+                  <h3 className="font-bold text-lg">{otherMemberUser?.name || otherMember?.user?.name}</h3>
+                  <p className={`text-xs flex items-center gap-1 ${otherMemberPresence.textClassName}`}>
+                    <span className={`size-2 rounded-full inline-block ${otherMemberPresence.dotClassName}`} />
+                    {otherMemberPresence.label}
                   </p>
                 </div>
               </>
