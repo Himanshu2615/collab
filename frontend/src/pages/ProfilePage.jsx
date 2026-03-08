@@ -68,7 +68,11 @@ const ProfilePage = () => {
     const handleSubmit = (e) => {
         e.preventDefault();
         if (!form.fullName.trim()) return toast.error("Name is required");
-        save(form);
+        // Only include profilePic when the user explicitly chose a new image.
+        // Sending "" would overwrite the existing Cloudinary URL in the DB.
+        const payload = { ...form };
+        if (!payload.profilePic) delete payload.profilePic;
+        save(payload);
     };
 
     const displayName = form.fullName || authUser?.fullName || "";

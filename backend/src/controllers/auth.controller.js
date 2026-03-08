@@ -198,9 +198,12 @@ export async function updateProfile(req, res) {
       }
     }
 
-    // Build update object — omit profilePic entirely if upload failed (keeps existing value)
+    // Build update object — omit profilePic entirely if upload failed or no new
+    // image was provided (keeps existing Cloudinary URL in the database).
     const updateFields = { fullName, bio, nativeLanguage, learningLanguage, location };
-    if (profilePicUrl !== undefined) updateFields.profilePic = profilePicUrl;
+    if (profilePicUrl !== undefined && profilePicUrl !== "") {
+      updateFields.profilePic = profilePicUrl;
+    }
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,

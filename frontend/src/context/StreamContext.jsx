@@ -6,6 +6,7 @@ import { getStreamToken } from "../lib/api";
 import useAuthUser from "../hooks/useAuthUser";
 import Avatar from "../components/Avatar";
 import { isValidAvatarUrl } from "../lib/avatarUtils";
+import { setUserImageCache } from "../lib/userImageCache";
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 const StreamContext = createContext(null);
@@ -306,14 +307,20 @@ export const StreamProvider = ({ children }) => {
         const client = StreamChat.getInstance(STREAM_API_KEY);
 
         /* Connect only once */
+        const img = authUser.profilePic?.startsWith("data:")
+          ? "" : authUser.profilePic || "";
         if (client.userID !== authUser._id) {
-          const img = authUser.profilePic?.startsWith("data:")
-            ? "" : authUser.profilePic || "";
           await client.connectUser(
             { id: authUser._id, name: authUser.fullName, image: img },
             tokenData.token
           );
+        } else if (img && client.user?.image !== img) {
+          /* Profile pic changed after initial connect — push it to Stream */
+          client.partialUpdateUser({ id: authUser._id, set: { image: img } }).catch(() => {});
         }
+
+        /* Cache own image so SlackMessage always resolves it */
+        setUserImageCache(authUser._id, authUser.profilePic);
 
         if (!isMounted) return;
 
