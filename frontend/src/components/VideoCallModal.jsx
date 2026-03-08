@@ -6,6 +6,12 @@ import '@stream-io/video-react-sdk/dist/css/styles.css';
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 
+const getOrgSlug = (user) => {
+  if (!user?.organization) return null;
+  if (typeof user.organization === 'object') return user.organization.slug || null;
+  return null;
+};
+
 const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, participantIds = [], participantNames = [], callType = 'video' }) => {
   const [client, setClient] = useState(null);
   const [call, setCall] = useState(null);
@@ -162,16 +168,19 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       setClient(videoClient);
       const videoCall = videoClient.call('default', callId);
       callRef.current = videoCall;
+      const uniqueParticipantIds = Array.from(new Set([user._id, ...participantIds])).filter(Boolean);
+      const team = getOrgSlug(user);
 
       if (isInitiator) {
         // Create the call and ring all members.
         // The `data.members` array includes both the caller and all callees.
         await videoCall.getOrCreate({
           ring: true,
+          notify: true,
+          video: callType === 'video',
           data: {
-            members: Array.from(new Set(participantIds))
-              .filter(Boolean)
-              .map((id) => ({ user_id: id })),
+            members: uniqueParticipantIds.map((id) => ({ user_id: id })),
+            ...(team ? { team } : {}),
           },
         });
       } else {

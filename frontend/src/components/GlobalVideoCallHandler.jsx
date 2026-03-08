@@ -44,6 +44,39 @@ const GlobalVideoCallHandler = () => {
     localStorage.setItem('callLogs', JSON.stringify(logs.slice(0, 50)));
   };
 
+  const buildIncomingCallFromEvent = (event) => {
+    if (!event?.call_cid) return null;
+
+    const callId = event.call?.id || event.call_cid.split(':')[1] || event.call_cid;
+    const createdBy = event.call?.created_by || event.created_by || null;
+    const creator = createdBy?.id ? createdBy : (event.user?.id ? event.user : null);
+    const callerUserId = creator?.id || null;
+
+    if (callerUserId && callerUserId === authUser._id) return null;
+
+    const conversationId = callerUserId
+      ? [authUser._id, callerUserId].sort().join('-')
+      : null;
+
+    const members = Array.isArray(event.members) ? event.members : [];
+    const participantIds = members.map((m) => m.user_id).filter(Boolean);
+    const participantNames = members
+      .map((m) => m.user?.name || m.user_id)
+      .filter((name) => name && name !== authUser.fullName);
+
+    return {
+      callId,
+      callerName: creator?.name || createdBy?.name || event.user?.name || 'Someone',
+      callerImage: creator?.image || createdBy?.image || event.user?.image || '',
+      type: (event.video ?? event.call?.video ?? true) ? 'video' : 'audio',
+      conversationId,
+      callerUserId,
+      participantIds,
+      participantNames,
+      startedAt: event.created_at || new Date().toISOString(),
+    };
+  };
+
   useEffect(() => {
     if (!authUser || !tokenData?.token) return;
 
@@ -58,38 +91,16 @@ const GlobalVideoCallHandler = () => {
     });
     videoClientRef.current = videoClient;
 
-    const unsubscribeRing = videoClient.on('call.ring', (event) => {
-      if (!event?.call_cid || event.user?.id === authUser._id) return;
-
-      const callId = event.call?.id || event.call_cid.split(':')[1] || event.call_cid;
-      const callerUserId = event.user?.id || null;
-
-      // Reconstruct the DM channel ID so we can check per-conversation mute
-      const conversationId = callerUserId
-        ? [authUser._id, callerUserId].sort().join('-')
-        : null;
-
-      const nextIncomingCall = {
-        callId,
-        callerName: event.user?.name || 'Someone',
-        callerImage: event.user?.image || '',
-        // `event.video` is the canonical field; fall back to call-level flag.
-        type: (event.video ?? event.call?.video ?? true) ? 'video' : 'audio',
-        conversationId,
-        callerUserId,
-        participantIds: (event.members || []).map((m) => m.user_id).filter(Boolean),
-        participantNames: (event.members || [])
-          .map((m) => m.user?.name || m.user_id)
-          .filter((name) => name && name !== authUser.fullName),
-        startedAt: event.created_at || new Date().toISOString(),
-      };
+    const handleIncomingRingEvent = (event) => {
+      const nextIncomingCall = buildIncomingCallFromEvent(event);
+      if (!nextIncomingCall) return;
 
       // Deduplicate identical ringing events
-      if (activeIncomingCallIdRef.current === callId) return;
-      activeIncomingCallIdRef.current = callId;
+      if (activeIncomingCallIdRef.current === nextIncomingCall.callId) return;
+      activeIncomingCallIdRef.current = nextIncomingCall.callId;
 
       // Respect per-conversation call mute preference
-      if (isCallMutedLiveRef.current?.(conversationId)) {
+      if (isCallMutedLiveRef.current?.(nextIncomingCall.conversationId)) {
         mutedIncomingCallRef.current = nextIncomingCall;
         return;
       }
@@ -102,17 +113,20 @@ const GlobalVideoCallHandler = () => {
           const n = new Notification(`${nextIncomingCall.callerName} is calling`, {
             body: nextIncomingCall.type === 'video' ? 'Incoming video call' : 'Incoming audio call',
             icon: nextIncomingCall.callerImage || '/favicon.ico',
-            tag: `call-${callId}`,
+            tag: `call-${nextIncomingCall.callId}`,
             renotify: true,
           });
           n.onclick = () => {
             window.focus();
-            if (callerUserId) navigate(`/chat/${callerUserId}`);
+            if (nextIncomingCall.callerUserId) navigate(`/chat/${nextIncomingCall.callerUserId}`);
             n.close();
           };
         } catch (_) { /* ignore */ }
       }
-    });
+    };
+
+    const unsubscribeRing = videoClient.on('call.ring', handleIncomingRingEvent);
+    const unsubscribeNotification = videoClient.on('call.notification', handleIncomingRingEvent);
 
     const logMissedCall = (endedCallId) => {
       const current = incomingCallRef.current;
@@ -166,6 +180,7 @@ const GlobalVideoCallHandler = () => {
 
     return () => {
       unsubscribeRing?.();
+      unsubscribeNotification?.();
       unsubscribeReject?.();
       unsubscribeAccept?.();
       unsubscribeEnd?.();
@@ -175,7 +190,7 @@ const GlobalVideoCallHandler = () => {
         videoClientRef.current = null;
       }
     };
-  }, [authUser, tokenData]);
+  }, [authUser, tokenData, navigate]);
 
   const handleAccept = () => {
     if (!incomingCall) return;
