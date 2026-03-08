@@ -27,6 +27,15 @@ const organizationSchema = new mongoose.Schema(
             type: String,
             default: "",
         },
+        logo: {
+            type: String,
+            default: "",
+        },
+        website: {
+            type: String,
+            default: "",
+            trim: true,
+        },
         inviteCode: {
             type: String,
             required: true,

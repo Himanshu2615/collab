@@ -5,6 +5,7 @@ import {
     joinOrganization,
     getMyOrganization,
     regenerateInviteCode,
+    updateOrganizationSettings,
     createChannel,
     deleteChannel,
     getOrgMembers,
@@ -19,6 +20,7 @@ router.get("/members", getOrgMembers);
 router.post("/create", createOrganization);
 router.post("/join", joinOrganization);
 router.post("/regenerate-code", regenerateInviteCode);
+router.put("/settings", updateOrganizationSettings);
 router.post("/channels", createChannel);
 router.delete("/channels/:channelId", deleteChannel);
 

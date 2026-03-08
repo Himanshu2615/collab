@@ -180,6 +180,11 @@ export async function regenerateInviteCode() {
   return response.data;
 }
 
+export async function updateOrganizationSettings(data) {
+  const response = await axiosInstance.put("/organizations/settings", data);
+  return response.data;
+}
+
 export async function createOrgChannel(data) {
   const response = await axiosInstance.post("/organizations/channels", data);
   return response.data;

@@ -1,6 +1,7 @@
 import Organization from "../models/Organization.js";
 import User from "../models/User.js";
 import { ensureStreamChannel, upsertStreamUser } from "../lib/stream.js";
+import cloudinary from "../lib/cloudinary.js";
 
 const canAccessChannel = (channel, userId, role) => {
     if (!channel) return false;
@@ -185,6 +186,70 @@ export async function regenerateInviteCode(req, res) {
         res.status(200).json({ success: true, inviteCode: org.inviteCode });
     } catch (error) {
         console.error("Error in regenerateInviteCode:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+/* ─────────────────────────────────────────
+   PUT /api/organizations/settings
+   Admin updates organization display settings
+──────────────────────────────────────────── */
+export async function updateOrganizationSettings(req, res) {
+    try {
+        if (!req.user?.organization) return res.status(404).json({ message: "You are not in an organization" });
+        if (!["admin", "owner"].includes(req.user.role)) return res.status(403).json({ message: "Admins only" });
+
+        const { name, description = "", website = "", logo } = req.body;
+
+        if (!name?.trim()) {
+            return res.status(400).json({ message: "Organization name is required" });
+        }
+
+        let logoUrl = logo;
+        if (logo?.startsWith("data:")) {
+            try {
+                const uploadResponse = await cloudinary.uploader.upload(logo, {
+                    folder: "organization_logos",
+                });
+                logoUrl = uploadResponse.secure_url;
+            } catch (uploadError) {
+                console.error("Cloudinary upload error during organization update:", uploadError);
+                logoUrl = undefined;
+            }
+        }
+
+        const normalizedWebsite = website.trim();
+        if (normalizedWebsite && !/^https?:\/\//i.test(normalizedWebsite)) {
+            return res.status(400).json({ message: "Website must start with http:// or https://" });
+        }
+
+        const updateFields = {
+            name: name.trim(),
+            description: description.trim(),
+            website: normalizedWebsite,
+        };
+
+        if (logoUrl !== undefined) updateFields.logo = logoUrl;
+
+        const organization = await Organization.findByIdAndUpdate(
+            req.user.organization,
+            updateFields,
+            { new: true, runValidators: true }
+        )
+            .populate("owner", "fullName profilePic")
+            .lean();
+
+        if (!organization) return res.status(404).json({ message: "Organization not found" });
+
+        const memberCount = await User.countDocuments({ organization: req.user.organization });
+        const isAdminOrOwner = organization.admins.some((a) => a.toString() === req.user._id.toString());
+        if (!isAdminOrOwner) delete organization.inviteCode;
+        organization.channels = serializeVisibleChannels(organization.channels, req.user._id, req.user.role);
+        organization.memberCount = memberCount;
+
+        res.status(200).json({ success: true, organization });
+    } catch (error) {
+        console.error("Error in updateOrganizationSettings:", error);
         res.status(500).json({ message: "Internal Server Error" });
     }
 }

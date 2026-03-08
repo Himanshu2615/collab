@@ -10,6 +10,7 @@ import { useStreamContext } from "../context/StreamContext";
 import {
   BellIcon,
   BellOffIcon,
+  ChevronRightIcon,
   FileTextIcon,
   HashIcon,
   LayoutDashboardIcon,
@@ -27,8 +28,8 @@ import ContactCard from "./ContactCard";
 
 /* ── tiny helpers ── */
 const SectionLabel = ({ label, action }) => (
-  <div className="flex items-center justify-between px-3 pt-4 pb-1">
-    <span className="text-[11px] font-bold uppercase tracking-widest text-base-content/40 select-none">
+  <div className="flex items-center justify-between px-4 pt-5 pb-2">
+    <span className="text-[11px] font-bold uppercase tracking-[0.24em] text-base-content/35 select-none">
       {label}
     </span>
     {action}
@@ -40,15 +41,15 @@ const ChannelItem = ({ to, name, isPrivate, currentPath }) => {
   return (
     <Link
       to={to}
-      className={`flex items-center gap-2 mx-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
+      className={`group flex items-center gap-2.5 mx-3 px-3 py-2.5 rounded-2xl text-sm border transition-all ${
         active
-          ? "bg-primary text-primary-content font-semibold"
-          : "text-base-content/65 hover:bg-base-content/8 hover:text-base-content"
+          ? "border-primary/15 bg-primary/10 text-primary shadow-sm font-semibold"
+          : "border-transparent text-base-content/65 hover:border-base-300 hover:bg-base-200/70 hover:text-base-content"
       }`}
     >
       {isPrivate
-        ? <LockIcon className={`size-3.5 flex-shrink-0 ${active ? "opacity-80" : "text-base-content/40"}`} />
-        : <HashIcon  className={`size-3.5 flex-shrink-0 ${active ? "opacity-80" : "text-base-content/40"}`} />
+        ? <LockIcon className={`size-3.5 flex-shrink-0 ${active ? "opacity-80" : "text-base-content/35 group-hover:text-base-content/55"}`} />
+        : <HashIcon  className={`size-3.5 flex-shrink-0 ${active ? "opacity-80" : "text-base-content/35 group-hover:text-base-content/55"}`} />
       }
       <span className="truncate">{name}</span>
     </Link>
@@ -75,18 +76,18 @@ const DmContextMenu = ({ x, y, pinned, muted, onPin, onToggleMute, onClose }) =>
     <div
       ref={ref}
       style={{ position: "fixed", top: y, left: x, zIndex: 9999 }}
-      className="bg-base-100 border border-base-300 rounded-lg shadow-xl py-1 min-w-44 text-sm"
+      className="min-w-48 rounded-2xl border border-base-300 bg-base-100/95 p-1.5 text-sm shadow-2xl backdrop-blur"
     >
       <button
         onClick={onPin}
-        className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-base-200 transition-colors text-left"
+        className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 hover:bg-base-200 transition-colors text-left"
       >
         <PinIcon className="size-3.5 text-base-content/50" />
         {pinned ? "Unpin Chat" : "Pin to Top"}
       </button>
       <button
         onClick={onToggleMute}
-        className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-base-200 transition-colors text-left"
+        className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 hover:bg-base-200 transition-colors text-left"
       >
         {muted
           ? <><BellIcon className="size-3.5 text-success" /> Unmute Notifications</>
@@ -110,10 +111,10 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
     <>
       <div
         onContextMenu={handleContextMenu}
-        className={`group flex items-center gap-2 mx-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
+        className={`group mx-3 flex items-center gap-3 rounded-2xl border px-3 py-2.5 text-sm transition-all ${
           active
-            ? "bg-primary text-primary-content font-semibold"
-            : "text-base-content/65 hover:bg-base-content/8 hover:text-base-content"
+            ? "border-primary/15 bg-primary/10 text-primary shadow-sm"
+            : "border-transparent text-base-content/72 hover:border-base-300 hover:bg-base-200/70 hover:text-base-content"
         }`}
       >
         {/* Avatar — opens contact card */}
@@ -125,17 +126,17 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
           <Avatar
             src={user.profilePic}
             name={user.fullName}
-            size="w-5 h-5"
+            size="w-9 h-9"
             rounded="rounded-full"
             className="group-hover/av:ring-2 group-hover/av:ring-primary transition"
           />
-          <span className="absolute -bottom-px -right-px w-2 h-2 bg-success border border-base-100 rounded-full" />
+          <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-base-100 bg-success" />
         </button>
 
         {/* Name + meta — navigates to DM */}
         <Link to={to} className="flex-1 min-w-0">
-          <div className="flex items-center gap-1">
-            <span className="truncate flex-1">{user.fullName}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="truncate flex-1 font-medium">{user.fullName}</span>
             {pinned && (
               <PinIcon className={`size-3 flex-shrink-0 ${active ? "opacity-60" : "text-base-content/30"}`} />
             )}
@@ -149,8 +150,8 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
             )}
           </div>
           {lastMsg && (
-            <p className={`text-[10px] truncate mt-0.5 ${
-              active ? "text-primary-content/70" : "text-base-content/40"
+            <p className={`mt-0.5 truncate text-[11px] ${
+              active ? "text-primary/70" : "text-base-content/45"
             } ${unread > 0 ? "font-semibold" : ""}`}>
               {lastMsg}
             </p>
@@ -161,7 +162,7 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTogglePin(); }}
           title={pinned ? "Unpin" : "Pin to top"}
-          className={`flex-shrink-0 p-0.5 rounded transition-all ${
+          className={`flex-shrink-0 rounded-lg p-1 transition-all ${
             pinned
               ? `${active ? "opacity-60" : "opacity-40 text-primary"}`
               : "opacity-0 group-hover:opacity-40 hover:!opacity-80"
@@ -191,13 +192,17 @@ const AppItem = ({ to, icon: Icon, label, currentPath }) => {
   return (
     <Link
       to={to}
-      className={`flex items-center gap-2.5 mx-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
+      className={`group flex items-center gap-3 mx-3 px-3 py-2.5 rounded-2xl border text-sm transition-all ${
         active
-          ? "bg-primary text-primary-content font-semibold"
-          : "text-base-content/65 hover:bg-base-content/8 hover:text-base-content"
+          ? "border-primary/15 bg-primary/10 text-primary shadow-sm font-semibold"
+          : "border-transparent text-base-content/70 hover:border-base-300 hover:bg-base-200/70 hover:text-base-content"
       }`}
     >
-      <Icon className={`size-4 flex-shrink-0 ${active ? "opacity-80" : "text-base-content/40"}`} />
+      <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl ${
+        active ? "bg-primary text-primary-content" : "bg-base-200 text-base-content/45 group-hover:text-base-content/60"
+      }`}>
+        <Icon className="size-4" />
+      </div>
       <span className="truncate">{label}</span>
     </Link>
   );
@@ -277,37 +282,46 @@ const Sidebar = () => {
   const totalUnread = Object.values(dmMeta).reduce((sum, m) => sum + (m.unread || 0), 0);
 
   return (
-    <aside className="w-52 bg-base-100 border-r border-base-300 hidden lg:flex flex-col h-screen sticky top-0 overflow-hidden">
+    <aside className="relative hidden h-screen w-72 shrink-0 overflow-hidden border-r border-base-300/80 bg-gradient-to-b from-base-100 via-base-100 to-base-200/40 lg:flex lg:flex-col lg:sticky lg:top-0">
+
+      <div className="pointer-events-none absolute inset-x-6 top-0 h-36 rounded-b-[2.5rem] bg-primary/6 blur-3xl" />
 
       {/* ── WORKSPACE HEADER ──────────────────── */}
-      <div className="flex items-center gap-2.5 px-4 h-14 border-b border-base-300 flex-shrink-0">
+      <div className="relative flex flex-shrink-0 items-center gap-3 border-b border-base-300/80 px-5 py-4">
         {/* app icon */}
-        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 shadow-sm">
-          <ShipWheelIcon className="size-4 text-primary-content" />
+        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-content shadow-lg shadow-primary/20 overflow-hidden">
+          {org?.logo ? (
+            <img src={org.logo} alt={org?.name || "Organization logo"} className="h-full w-full object-cover" />
+          ) : (
+            <ShipWheelIcon className="size-4 text-primary-content" />
+          )}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="font-bold text-sm leading-tight truncate">
+          <p className="truncate text-sm font-bold leading-tight">
             {org?.name || "Collab"}
           </p>
           {org?.slug && (
-            <p className="text-[10px] text-base-content/40 truncate">@{org.slug}</p>
+            <p className="truncate text-[11px] text-base-content/45">@{org.slug}</p>
           )}
+        </div>
+        <div className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+          Workspace
         </div>
         {/* logout button */}
         <button
           onClick={() => logoutMutation()}
           title="Sign out"
-          className="flex-shrink-0 p-1 rounded-md text-base-content/30 hover:text-error hover:bg-error/10 transition-colors"
+          className="flex-shrink-0 rounded-xl border border-transparent p-2 text-base-content/35 transition-all hover:border-error/15 hover:bg-error/10 hover:text-error"
         >
           <LogOutIcon className="size-3.5" />
         </button>
       </div>
 
       {/* ── SCROLLABLE BODY ───────────────────── */}
-      <div className="flex-1 overflow-y-auto pb-4">
+      <div className="flex-1 overflow-y-auto pb-5">
 
         {/* DASHBOARD */}
-        <div className="pt-3 pb-1">
+        <div className="px-1 pt-4 pb-1">
           <AppItem to="/" icon={LayoutDashboardIcon} label="Dashboard" currentPath={pathname} />
         </div>
 
@@ -327,7 +341,8 @@ const Sidebar = () => {
           }
         />
         {channels.length > 0 ? (
-          channels.map((ch) => {
+          <div className="space-y-1">
+          {channels.map((ch) => {
             const chPath = `/chat/${org?.slug ? `org-${org.slug}-${ch.name}` : ch.name}`;
             return (
               <ChannelItem
@@ -338,9 +353,10 @@ const Sidebar = () => {
                 currentPath={pathname}
               />
             );
-          })
+          })}
+          </div>
         ) : (
-          <p className="px-5 py-1 text-xs text-base-content/30 italic">No channels</p>
+          <p className="px-5 py-1 text-xs italic text-base-content/30">No channels</p>
         )}
 
         {/* DIRECT MESSAGES */}
@@ -407,7 +423,8 @@ const Sidebar = () => {
           }
         />
         {sortedContacts.length > 0 ? (
-        sortedContacts.slice(0, 8).map((contact) => {
+        <div className="space-y-1">
+        {sortedContacts.slice(0, 8).map((contact) => {
             // Compute the DM channel ID (sorted join) so we can read and toggle
             // the per-conversation mute preference.
             const dmChannelId = authUser
@@ -433,14 +450,15 @@ const Sidebar = () => {
                 }}
               />
             );
-          })
+          })}
+          </div>
         ) : (
-          <p className="px-5 py-1 text-xs text-base-content/30 italic">No contacts yet</p>
+          <p className="px-5 py-1 text-xs italic text-base-content/30">No contacts yet</p>
         )}
         {sortedContacts.length > 8 && (
           <Link
             to="/friends"
-            className="flex items-center mx-2 px-2 py-1.5 text-xs text-base-content/40 hover:text-primary transition-colors"
+            className="mx-3 flex items-center rounded-xl px-3 py-2 text-xs font-medium text-base-content/45 transition-colors hover:bg-base-200/70 hover:text-primary"
           >
             +{sortedContacts.length - 8} more…
           </Link>
@@ -457,24 +475,25 @@ const Sidebar = () => {
       </div>
 
       {/* ── USER FOOTER ──────────────────────── */}
-      <div className="flex-shrink-0 border-t border-base-300 px-3 py-2.5">
+      <div className="flex-shrink-0 border-t border-base-300/80 px-4 py-4">
         <Link
           to="/profile"
-          className="flex items-center gap-2.5 rounded-lg hover:bg-base-200 px-1.5 py-1.5 transition-colors group"
+          className="group flex items-center gap-3 rounded-2xl border border-base-300/80 bg-base-100/90 px-3 py-3 shadow-sm transition-all hover:border-primary/15 hover:bg-base-100"
         >
           <div className="relative flex-shrink-0">
             <Avatar
               src={authUser?.profilePic}
               name={authUser?.fullName}
-              size="w-7 h-7"
+              size="w-10 h-10"
               rounded="rounded-full"
             />
-            <span className="absolute -bottom-px -right-px w-2.5 h-2.5 bg-success border-2 border-base-100 rounded-full" />
+            <span className="absolute -bottom-px -right-px h-3 w-3 rounded-full border-2 border-base-100 bg-success" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold truncate leading-tight">{authUser?.fullName}</p>
-            <p className="text-[10px] text-base-content/40 capitalize truncate">{authUser?.role || "member"}</p>
+            <p className="truncate text-sm font-semibold leading-tight">{authUser?.fullName}</p>
+            <p className="truncate text-[11px] capitalize text-base-content/45">{authUser?.role || "member"}</p>
           </div>
+          <ChevronRightIcon className="size-4 text-base-content/30 transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
         </Link>
       </div>
 

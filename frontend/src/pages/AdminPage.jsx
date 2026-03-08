@@ -3,11 +3,13 @@ import {
   getMyOrganization,
   getOrgMembers,
   regenerateInviteCode,
+  updateOrganizationSettings,
   createOrgChannel,
   deleteOrgChannel,
 } from "../lib/api";
 import useAuthUser from "../hooks/useAuthUser";
 import {
+  CameraIcon,
   ShieldCheckIcon,
   UsersIcon,
   KeyRoundIcon,
@@ -20,18 +22,28 @@ import {
   LockIcon,
   GlobeIcon,
   UserPlusIcon,
+  SaveIcon,
 
   LoaderIcon,
   XIcon,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Avatar from "../components/Avatar";
 
 const AdminPage = () => {
   const { authUser } = useAuthUser();
   const queryClient = useQueryClient();
+  const logoInputRef = useRef(null);
   const [newChannel, setNewChannel] = useState({ name: "", description: "", memberIds: [] });
   const [showAddChannel, setShowAddChannel] = useState(false);
+  const [logoChanged, setLogoChanged] = useState(false);
+  const [orgForm, setOrgForm] = useState({
+    name: "",
+    description: "",
+    website: "",
+    logo: "",
+  });
 
   const { data: orgData, isLoading: orgLoading } = useQuery({
     queryKey: ["myOrganization"],
@@ -50,6 +62,17 @@ const AdminPage = () => {
   const isAdminOrOwner = ["admin", "owner"].includes(authUser?.role);
   const isPrivateChannel = newChannel.memberIds.length > 0;
 
+  useEffect(() => {
+    if (!org) return;
+    setOrgForm({
+      name: org.name || "",
+      description: org.description || "",
+      website: org.website || "",
+      logo: "",
+    });
+    setLogoChanged(false);
+  }, [org]);
+
   const { mutate: regenCode, isPending: regenPending } = useMutation({
     mutationFn: regenerateInviteCode,
     onSuccess: (data) => {
@@ -57,6 +80,20 @@ const AdminPage = () => {
       queryClient.invalidateQueries({ queryKey: ["myOrganization"] });
     },
     onError: () => toast.error("Failed to regenerate code"),
+  });
+
+  const { mutate: saveOrgSettings, isPending: saveOrgPending } = useMutation({
+    mutationFn: updateOrganizationSettings,
+    onSuccess: (data) => {
+      toast.success("Organization updated!");
+      setOrgForm((prev) => ({ ...prev, logo: "" }));
+      setLogoChanged(false);
+      queryClient.setQueryData(["myOrganization"], (old) => (
+        old ? { ...old, organization: data.organization } : old
+      ));
+      queryClient.invalidateQueries({ queryKey: ["myOrganization"] });
+    },
+    onError: (err) => toast.error(err.response?.data?.message || "Failed to update organization"),
   });
 
   const { mutate: addChannel, isPending: addPending } = useMutation({
@@ -92,6 +129,43 @@ const AdminPage = () => {
         ? prev.memberIds.filter((id) => id !== memberId)
         : [...prev.memberIds, memberId],
     }));
+  };
+
+  const setOrgField = (key, value) => setOrgForm((prev) => ({ ...prev, [key]: value }));
+
+  const handleLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Logo must be under 5 MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setLogoChanged(true);
+      setOrgField("logo", ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveOrgSettings = (e) => {
+    e.preventDefault();
+    if (!orgForm.name.trim()) {
+      toast.error("Organization name is required");
+      return;
+    }
+
+    saveOrgSettings({
+      name: orgForm.name,
+      description: orgForm.description,
+      website: orgForm.website,
+      logo: logoChanged ? orgForm.logo : (org?.logo || ""),
+    });
   };
 
   if (orgLoading) {
@@ -144,6 +218,130 @@ const AdminPage = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {isAdminOrOwner && (
+          <form onSubmit={handleSaveOrgSettings} className="card bg-base-200 border border-base-300 p-6 lg:col-span-2">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <Building2 className="size-5 text-primary" />
+                  <h3 className="text-lg font-bold">Organization Profile</h3>
+                </div>
+                <p className="text-sm text-base-content/60 max-w-2xl">
+                  Customize how your workspace appears with a logo, description, and website.
+                </p>
+              </div>
+
+              <button type="submit" disabled={saveOrgPending} className="btn btn-primary gap-2 self-start">
+                {saveOrgPending ? <LoaderIcon className="size-4 animate-spin" /> : <SaveIcon className="size-4" />}
+                Save changes
+              </button>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+              <div className="rounded-2xl border border-base-300 bg-base-100 p-5">
+                <p className="text-sm font-semibold mb-4">Workspace logo</p>
+                <div
+                  className="group relative mx-auto flex w-fit cursor-pointer items-center justify-center rounded-[28px] ring-2 ring-base-300 transition-all hover:ring-primary"
+                  onClick={() => logoInputRef.current?.click()}
+                  title="Upload organization logo"
+                >
+                  <Avatar
+                    src={logoChanged ? orgForm.logo : org?.logo}
+                    name={orgForm.name || org?.name}
+                    size="w-28 h-28"
+                    rounded="rounded-[28px]"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                    <CameraIcon className="size-6 text-white" />
+                  </div>
+                </div>
+
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleLogoUpload}
+                />
+
+                <div className="mt-4 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => logoInputRef.current?.click()}
+                    className="btn btn-outline btn-sm w-full gap-2"
+                  >
+                    <CameraIcon className="size-4" /> Upload logo
+                  </button>
+                  {(logoChanged ? orgForm.logo : org?.logo) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLogoChanged(true);
+                        setOrgField("logo", "");
+                      }}
+                      className="btn btn-ghost btn-sm w-full text-error"
+                    >
+                      Remove logo
+                    </button>
+                  )}
+                  <p className="text-xs text-base-content/45 text-center">
+                    PNG, JPG or GIF · max 5 MB
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="form-control sm:col-span-2">
+                  <label className="label pb-1">
+                    <span className="label-text font-medium">Organization name</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={orgForm.name}
+                    onChange={(e) => setOrgField("name", e.target.value)}
+                    className="input input-bordered w-full"
+                    placeholder="Enter organization name"
+                  />
+                </div>
+
+                <div className="form-control sm:col-span-2">
+                  <label className="label pb-1">
+                    <span className="label-text font-medium">Description</span>
+                  </label>
+                  <textarea
+                    value={orgForm.description}
+                    onChange={(e) => setOrgField("description", e.target.value.slice(0, 220))}
+                    className="textarea textarea-bordered min-h-28 resize-none"
+                    placeholder="Tell your team what this workspace is for"
+                  />
+                  <label className="label pt-1">
+                    <span className="label-text-alt text-base-content/40">{orgForm.description.length}/220</span>
+                  </label>
+                </div>
+
+                <div className="form-control sm:col-span-2">
+                  <label className="label pb-1">
+                    <span className="label-text font-medium flex items-center gap-1.5">
+                      <GlobeIcon className="size-3.5" /> Website
+                    </span>
+                  </label>
+                  <input
+                    type="url"
+                    value={orgForm.website}
+                    onChange={(e) => setOrgField("website", e.target.value)}
+                    className="input input-bordered w-full"
+                    placeholder="https://your-company.com"
+                  />
+                </div>
+
+                <div className="sm:col-span-2 rounded-2xl border border-base-300 bg-base-100 px-4 py-3 text-sm text-base-content/60">
+                  <span className="font-semibold text-base-content">Workspace slug:</span> @{org.slug}
+                </div>
+              </div>
+            </div>
+          </form>
+        )}
+
         {/* INVITE CODE */}
         {isAdminOrOwner && (
           <div className="card bg-base-200 border border-base-300 p-6">
