@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { getMyOrganization, getUserFriends } from "../lib/api";
 import { useStreamContext } from "../context/StreamContext";
+import { getPresenceMeta } from "../lib/presenceUtils";
 import {
   BellIcon,
   BellOffIcon,
@@ -41,15 +42,14 @@ const ChannelItem = ({ to, name, isPrivate, currentPath }) => {
   return (
     <Link
       to={to}
-      className={`group flex items-center gap-2.5 mx-3 px-3 py-2.5 rounded-2xl text-sm border transition-all ${
-        active
+      className={`group flex items-center gap-2.5 mx-3 px-3 py-2.5 rounded-2xl text-sm border transition-all ${active
           ? "border-primary/15 bg-primary/10 text-primary shadow-sm font-semibold"
           : "border-transparent text-base-content/65 hover:border-base-300 hover:bg-base-200/70 hover:text-base-content"
-      }`}
+        }`}
     >
       {isPrivate
         ? <LockIcon className={`size-3.5 flex-shrink-0 ${active ? "opacity-80" : "text-base-content/35 group-hover:text-base-content/55"}`} />
-        : <HashIcon  className={`size-3.5 flex-shrink-0 ${active ? "opacity-80" : "text-base-content/35 group-hover:text-base-content/55"}`} />
+        : <HashIcon className={`size-3.5 flex-shrink-0 ${active ? "opacity-80" : "text-base-content/35 group-hover:text-base-content/55"}`} />
       }
       <span className="truncate">{name}</span>
     </Link>
@@ -65,10 +65,10 @@ const DmContextMenu = ({ x, y, pinned, muted, onPin, onToggleMute, onClose }) =>
     };
     const esc = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("mousedown", close);
-    document.addEventListener("keydown",   esc);
+    document.addEventListener("keydown", esc);
     return () => {
       document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown",   esc);
+      document.removeEventListener("keydown", esc);
     };
   }, [onClose]);
 
@@ -98,7 +98,7 @@ const DmContextMenu = ({ x, y, pinned, muted, onPin, onToggleMute, onClose }) =>
   );
 };
 
-const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned, muted, onTogglePin, onToggleMute }) => {
+const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned, muted, onTogglePin, onToggleMute, presenceMeta }) => {
   const active = currentPath === to || currentPath.startsWith(to + "/");
   const [menu, setMenu] = useState(null); // { x, y } or null
 
@@ -111,11 +111,10 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
     <>
       <div
         onContextMenu={handleContextMenu}
-        className={`group mx-3 flex items-center gap-3 rounded-2xl border px-3 py-2.5 text-sm transition-all ${
-          active
+        className={`group mx-3 flex items-center gap-3 rounded-2xl border px-3 py-2.5 text-sm transition-all ${active
             ? "border-primary/15 bg-primary/10 text-primary shadow-sm"
             : "border-transparent text-base-content/72 hover:border-base-300 hover:bg-base-200/70 hover:text-base-content"
-        }`}
+          }`}
       >
         {/* Avatar — opens contact card */}
         <button
@@ -130,7 +129,7 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
             rounded="rounded-full"
             className="group-hover/av:ring-2 group-hover/av:ring-primary transition"
           />
-          <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-base-100 bg-success" />
+          <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-base-100 ${presenceMeta?.dotClassName || "bg-error"}`} />
         </button>
 
         {/* Name + meta — navigates to DM */}
@@ -150,9 +149,8 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
             )}
           </div>
           {lastMsg && (
-            <p className={`mt-0.5 truncate text-[11px] ${
-              active ? "text-primary/70" : "text-base-content/45"
-            } ${unread > 0 ? "font-semibold" : ""}`}>
+            <p className={`mt-0.5 truncate text-[11px] ${active ? "text-primary/70" : "text-base-content/45"
+              } ${unread > 0 ? "font-semibold" : ""}`}>
               {lastMsg}
             </p>
           )}
@@ -162,11 +160,10 @@ const DmItem = ({ to, user, currentPath, onAvatarClick, unread, lastMsg, pinned,
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTogglePin(); }}
           title={pinned ? "Unpin" : "Pin to top"}
-          className={`flex-shrink-0 rounded-lg p-1 transition-all ${
-            pinned
+          className={`flex-shrink-0 rounded-lg p-1 transition-all ${pinned
               ? `${active ? "opacity-60" : "opacity-40 text-primary"}`
               : "opacity-0 group-hover:opacity-40 hover:!opacity-80"
-          } hover:bg-base-content/10`}
+            } hover:bg-base-content/10`}
         >
           <PinIcon className="size-3" />
         </button>
@@ -192,15 +189,13 @@ const AppItem = ({ to, icon: Icon, label, currentPath }) => {
   return (
     <Link
       to={to}
-      className={`group flex items-center gap-3 mx-3 px-3 py-2.5 rounded-2xl border text-sm transition-all ${
-        active
+      className={`group flex items-center gap-3 mx-3 px-3 py-2.5 rounded-2xl border text-sm transition-all ${active
           ? "border-primary/15 bg-primary/10 text-primary shadow-sm font-semibold"
           : "border-transparent text-base-content/70 hover:border-base-300 hover:bg-base-200/70 hover:text-base-content"
-      }`}
+        }`}
     >
-      <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl ${
-        active ? "bg-primary text-primary-content" : "bg-base-200 text-base-content/45 group-hover:text-base-content/60"
-      }`}>
+      <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl ${active ? "bg-primary text-primary-content" : "bg-base-200 text-base-content/45 group-hover:text-base-content/60"
+        }`}>
         <Icon className="size-4" />
       </div>
       <span className="truncate">{label}</span>
@@ -210,13 +205,13 @@ const AppItem = ({ to, icon: Icon, label, currentPath }) => {
 
 /* ════════════════════════════════════════════ */
 const Sidebar = () => {
-  const { authUser }    = useAuthUser();
+  const { authUser } = useAuthUser();
   const { logoutMutation } = useLogout();
-  const { pathname }    = useLocation();
+  const { pathname } = useLocation();
   const [contactCardUser, setContactCardUser] = useState(null);
 
   /* Stream DM metadata */
-  const { dmMeta, notifPermission, requestNotifPermission, isMessageMuted, toggleNotificationMute } = useStreamContext();
+  const { dmMeta, notifPermission, requestNotifPermission, isMessageMuted, toggleNotificationMute, getUserPresence } = useStreamContext();
 
   /* Pinned DM user IDs — persisted in localStorage */
   const [pinnedIds, setPinnedIds] = useState(() => {
@@ -235,26 +230,26 @@ const Sidebar = () => {
   };
 
   const { data: orgData } = useQuery({
-    queryKey:  ["myOrganization"],
-    queryFn:   getMyOrganization,
-    enabled:   !!authUser,
+    queryKey: ["myOrganization"],
+    queryFn: getMyOrganization,
+    enabled: !!authUser,
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: friends = [] } = useQuery({
-    queryKey:  ["friends"],
-    queryFn:   getUserFriends,
-    enabled:   !!authUser,
+    queryKey: ["friends"],
+    queryFn: getUserFriends,
+    enabled: !!authUser,
     staleTime: 60_000,
   });
 
-  const org      = orgData?.organization;
+  const org = orgData?.organization;
   const channels = org?.channels || [];
-  const isAdmin  = ["admin", "owner"].includes(authUser?.role);
+  const isAdmin = ["admin", "owner"].includes(authUser?.role);
 
   /* Build unified DM contacts list: friends + non-friend message partners */
   const friendIds = new Set(friends.map(f => f._id));
-  
+
   /* Create virtual user objects for non-friend DM partners */
   const nonFriendDmPartners = Object.entries(dmMeta)
     .filter(([partnerId]) => !friendIds.has(partnerId))
@@ -264,7 +259,7 @@ const Sidebar = () => {
       profilePic: meta.partnerImage || "",
       _isFromStream: true, // Flag to identify virtual users
     }));
-  
+
   /* Combine friends with non-friend DM partners */
   const allDmContacts = [...friends, ...nonFriendDmPartners];
 
@@ -342,18 +337,18 @@ const Sidebar = () => {
         />
         {channels.length > 0 ? (
           <div className="space-y-1">
-          {channels.map((ch) => {
-            const chPath = `/chat/${org?.slug ? `org-${org.slug}-${ch.name}` : ch.name}`;
-            return (
-              <ChannelItem
-                key={ch._id || ch.name}
-                to={chPath}
-                name={ch.name}
-                isPrivate={ch.isPrivate}
-                currentPath={pathname}
-              />
-            );
-          })}
+            {channels.map((ch) => {
+              const chPath = `/chat/${org?.slug ? `org-${org.slug}-${ch.name}` : ch.name}`;
+              return (
+                <ChannelItem
+                  key={ch._id || ch.name}
+                  to={chPath}
+                  name={ch.name}
+                  isPrivate={ch.isPrivate}
+                  currentPath={pathname}
+                />
+              );
+            })}
           </div>
         ) : (
           <p className="px-5 py-1 text-xs italic text-base-content/30">No channels</p>
@@ -423,34 +418,35 @@ const Sidebar = () => {
           }
         />
         {sortedContacts.length > 0 ? (
-        <div className="space-y-1">
-        {sortedContacts.slice(0, 8).map((contact) => {
-            // Compute the DM channel ID (sorted join) so we can read and toggle
-            // the per-conversation mute preference.
-            const dmChannelId = authUser
-              ? [authUser._id, contact._id].sort().join("-")
-              : null;
-            const isMuted = dmChannelId ? isMessageMuted(dmChannelId) : false;
+          <div className="space-y-1">
+            {sortedContacts.slice(0, 8).map((contact) => {
+              // Compute the DM channel ID (sorted join) so we can read and toggle
+              // the per-conversation mute preference.
+              const dmChannelId = authUser
+                ? [authUser._id, contact._id].sort().join("-")
+                : null;
+              const isMuted = dmChannelId ? isMessageMuted(dmChannelId) : false;
 
-            return (
-              <DmItem
-                key={contact._id}
-                to={`/chat/${contact._id}`}
-                user={contact}
-                currentPath={pathname}
-                onAvatarClick={setContactCardUser}
-                unread={dmMeta[contact._id]?.unread || 0}
-                lastMsg={dmMeta[contact._id]?.lastMsg || ""}
-                pinned={pinnedIds.includes(contact._id)}
-                muted={isMuted}
-                onTogglePin={() => togglePin(contact._id)}
-                onToggleMute={() => {
-                  if (!dmChannelId) return;
-                  toggleNotificationMute(dmChannelId, "messages");
-                }}
-              />
-            );
-          })}
+              return (
+                <DmItem
+                  key={contact._id}
+                  to={`/chat/${contact._id}`}
+                  user={contact}
+                  currentPath={pathname}
+                  onAvatarClick={setContactCardUser}
+                  unread={dmMeta[contact._id]?.unread || 0}
+                  lastMsg={dmMeta[contact._id]?.lastMsg || ""}
+                  pinned={pinnedIds.includes(contact._id)}
+                  muted={isMuted}
+                  presenceMeta={getPresenceMeta(getUserPresence(contact._id, contact))}
+                  onTogglePin={() => togglePin(contact._id)}
+                  onToggleMute={() => {
+                    if (!dmChannelId) return;
+                    toggleNotificationMute(dmChannelId, "messages");
+                  }}
+                />
+              );
+            })}
           </div>
         ) : (
           <p className="px-5 py-1 text-xs italic text-base-content/30">No contacts yet</p>
@@ -466,9 +462,9 @@ const Sidebar = () => {
 
         {/* APPS */}
         <SectionLabel label="Apps" />
-        <AppItem to="/files"    icon={FileTextIcon} label="Files"          currentPath={pathname} />
-        <AppItem to="/friends"  icon={UsersIcon}    label="Team & Friends" currentPath={pathname} />
-        <AppItem to="/schedule" icon={VideoIcon}    label="Meetings"       currentPath={pathname} />
+        <AppItem to="/files" icon={FileTextIcon} label="Files" currentPath={pathname} />
+        <AppItem to="/friends" icon={UsersIcon} label="Team & Friends" currentPath={pathname} />
+        <AppItem to="/schedule" icon={VideoIcon} label="Meetings" currentPath={pathname} />
         {isAdmin && (
           <AppItem to="/admin" icon={SettingsIcon} label="Settings" currentPath={pathname} />
         )}
@@ -487,7 +483,7 @@ const Sidebar = () => {
               size="w-10 h-10"
               rounded="rounded-full"
             />
-            <span className="absolute -bottom-px -right-px h-3 w-3 rounded-full border-2 border-base-100 bg-success" />
+            <span className={`absolute -bottom-px -right-px h-3 w-3 rounded-full border-2 border-base-100 ${getPresenceMeta(getUserPresence(authUser?._id, authUser)).dotClassName || "bg-success"}`} />
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold leading-tight">{authUser?.fullName}</p>

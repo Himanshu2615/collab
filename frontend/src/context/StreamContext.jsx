@@ -17,9 +17,8 @@ const MsgToast = ({ t, avatar, senderName, text, partnerId }) => (
   <Link
     to={`/chat/${partnerId}`}
     onClick={() => toast.dismiss(t.id)}
-    className={`flex items-start gap-3 bg-base-100 border border-base-300 shadow-xl rounded-xl px-4 py-3 w-72 cursor-pointer transition-all ${
-      t.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
-    }`}
+    className={`flex items-start gap-3 bg-base-100 border border-base-300 shadow-xl rounded-xl px-4 py-3 w-72 cursor-pointer transition-all ${t.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+      }`}
   >
     <Avatar
       src={avatar}
@@ -95,7 +94,15 @@ export const StreamProvider = ({ children }) => {
   const cleanupRef = useRef(null);
   /* Keep stable refs for use inside event callbacks */
   const selfIdRef = useRef(null);
-  useEffect(() => { selfIdRef.current = authUser?._id ?? null; }, [authUser]);
+  useEffect(() => {
+    selfIdRef.current = authUser?._id ?? null;
+    if (typeof window !== "undefined") {
+      window.__collabAuthUserId = authUser?._id ?? null;
+      if (authUser?._id) {
+        window.__collabLastActive = Date.now();
+      }
+    }
+  }, [authUser]);
 
   const dmMetaRef = useRef(dmMeta);
   useEffect(() => { dmMetaRef.current = dmMeta; }, [dmMeta]);
@@ -111,10 +118,24 @@ export const StreamProvider = ({ children }) => {
         const userId = user?.id || user?._id;
         if (!userId) return;
 
-        const merged = mergePresenceUser(prev[userId], {
-          ...user,
+        const prevUser = prev[userId];
+
+        // If we recently forced this user online locally, don't let a stale
+        // server event (like user_updated) instantly mark them offline again.
+        let safeUser = { ...user };
+        if (prevUser?.last_active && user.last_active) {
+          const prevTime = new Date(prevUser.last_active).getTime();
+          const newTime = new Date(user.last_active).getTime();
+          if (prevTime > newTime) {
+            safeUser.last_active = prevUser.last_active;
+            if (prevUser.online) safeUser.online = true;
+          }
+        }
+
+        const merged = mergePresenceUser(prevUser, {
+          ...safeUser,
           id: userId,
-          image: sanitizeStreamImage(user?.image) || user?.profilePic || "",
+          image: sanitizeStreamImage(safeUser?.image) || safeUser?.profilePic || "",
         });
 
         const prevSerialized = JSON.stringify(prev[userId] || null);
@@ -171,8 +192,8 @@ export const StreamProvider = ({ children }) => {
       const legacyMutedIds = JSON.parse(localStorage.getItem(MUTED_CONVERSATIONS_KEY) || "[]");
       return Array.isArray(legacyMutedIds)
         ? Object.fromEntries(
-            legacyMutedIds.map((id) => [id, { messages: true, calls: true }])
-          )
+          legacyMutedIds.map((id) => [id, { messages: true, calls: true }])
+        )
         : {};
     } catch {
       return {};
@@ -377,24 +398,28 @@ export const StreamProvider = ({ children }) => {
           );
         } else if (img && client.user?.image !== img) {
           /* Profile pic changed after initial connect — push it to Stream */
-          client.partialUpdateUser({ id: authUser._id, set: { image: img } }).catch(() => {});
+          client.partialUpdateUser({ id: authUser._id, set: { image: img } }).catch(() => { });
         }
 
         /* Cache own image so SlackMessage always resolves it */
         setUserImageCache(authUser._id, authUser.profilePic);
-  upsertPresenceUsers([{ id: authUser._id, name: authUser.fullName, image: img, online: true }]);
+        upsertPresenceUsers([{ id: authUser._id, name: authUser.fullName, image: img, online: true }]);
 
         if (!isMounted) return;
 
         /* ── shared handler ──────────────────────────── */
         const handleMsg = (channelId, sender, message, notif = false, eventUnreadCount = undefined) => {
-          const selfId    = selfIdRef.current;
+          if (sender) {
+            upsertPresenceUsers([{ ...sender, online: true, last_active: new Date().toISOString() }]);
+          }
+
+          const selfId = selfIdRef.current;
           const partnerId = extractPartnerId(channelId, selfId);
           if (!partnerId) return;
 
-          const isFromSelf   = sender?.id === selfId;
+          const isFromSelf = sender?.id === selfId;
           const isActiveChat = window.location.pathname.includes(partnerId);
-          
+
           /* For incoming messages, the sender IS the partner (unless it's from self) */
           const partnerInfo = isFromSelf ? null : sender;
 
@@ -422,7 +447,7 @@ export const StreamProvider = ({ children }) => {
                 const n = new Notification(senderName, {
                   body: txt,
                   icon: sanitizeStreamImage(sender?.image) || "/favicon.ico",
-                  tag:  `dm-${partnerId}`,   // collapses multiple messages from same person
+                  tag: `dm-${partnerId}`,   // collapses multiple messages from same person
                   renotify: true,
                 });
                 n.onclick = () => {
@@ -460,10 +485,10 @@ export const StreamProvider = ({ children }) => {
               [partnerId]: {
                 channelId,
                 unread: nextUnread,
-                lastMsg:         msgPreview(message),
-                lastMsgAt:       message?.created_at || new Date().toISOString(),
+                lastMsg: msgPreview(message),
+                lastMsgAt: message?.created_at || new Date().toISOString(),
                 lastMsgSenderId: sender?.id || null,
-                partnerName:  partnerInfo?.name  || prev[partnerId]?.partnerName  || partnerId,
+                partnerName: partnerInfo?.name || prev[partnerId]?.partnerName || partnerId,
                 partnerImage: sanitizeStreamImage(partnerInfo?.image) || prev[partnerId]?.partnerImage || "",
               },
             };
@@ -509,10 +534,10 @@ export const StreamProvider = ({ children }) => {
           if (partnerId) {
             const cid = `messaging:${event.channel_id}`;
             const activeChannel = client.activeChannels?.[cid];
-            
+
             setDmMeta((prev) => {
-              const exactUnread = activeChannel && typeof activeChannel.countUnread === 'function' 
-                ? activeChannel.countUnread() 
+              const exactUnread = activeChannel && typeof activeChannel.countUnread === 'function'
+                ? activeChannel.countUnread()
                 : (event.unread_messages ?? prev[partnerId]?.unread ?? 0);
 
               return {
@@ -523,11 +548,11 @@ export const StreamProvider = ({ children }) => {
           }
         };
 
-        client.on("message.new",               onMessageNew);
-        client.on("notification.message_new",  onNotificationMessageNew);
-        client.on("message.read",              onMarkRead);
-        client.on("notification.mark_read",    onMarkRead);
-        client.on("notification.mark_unread",  onMarkUnread);
+        client.on("message.new", onMessageNew);
+        client.on("notification.message_new", onNotificationMessageNew);
+        client.on("message.read", onMarkRead);
+        client.on("notification.mark_read", onMarkRead);
+        client.on("notification.mark_unread", onMarkUnread);
 
         const onPresenceChanged = (event) => {
           const changedUser = event.user || event.me || event.member?.user;
@@ -539,8 +564,16 @@ export const StreamProvider = ({ children }) => {
           if (updatedUser) upsertPresenceUsers([updatedUser]);
         };
 
+        const onUserActive = (event) => {
+          const activeUser = event.user;
+          if (activeUser) {
+            upsertPresenceUsers([{ ...activeUser, online: true, last_active: new Date().toISOString() }]);
+          }
+        };
+
         client.on("user.presence.changed", onPresenceChanged);
         client.on("user.updated", onUserUpdated);
+        client.on("typing.start", onUserActive);
 
         const seedExistingChannels = async () => {
           try {
@@ -603,13 +636,14 @@ export const StreamProvider = ({ children }) => {
             }
             scheduledSeed = null;
           }
-          client.off("message.new",               onMessageNew);
-          client.off("notification.message_new",  onNotificationMessageNew);
-          client.off("message.read",              onMarkRead);
-          client.off("notification.mark_read",    onMarkRead);
-          client.off("notification.mark_unread",  onMarkUnread);
-          client.off("user.presence.changed",     onPresenceChanged);
-          client.off("user.updated",              onUserUpdated);
+          client.off("message.new", onMessageNew);
+          client.off("notification.message_new", onNotificationMessageNew);
+          client.off("message.read", onMarkRead);
+          client.off("notification.mark_read", onMarkRead);
+          client.off("notification.mark_unread", onMarkUnread);
+          client.off("user.presence.changed", onPresenceChanged);
+          client.off("user.updated", onUserUpdated);
+          client.off("typing.start", onUserActive);
         };
       } catch (err) {
         console.error("[StreamContext] setup error:", err);
@@ -673,9 +707,9 @@ export const useStreamContext = () =>
     presenceById: {},
     getUserPresence: (_, fallbackUser = null) => fallbackUser,
     refreshUserPresence: async () => [],
-    markAsRead: () => {},
+    markAsRead: () => { },
     notifPermission: "unsupported",
-    requestNotifPermission: async () => {},
+    requestNotifPermission: async () => { },
     notificationPrefs: {},
     getConversationPrefs: () => DEFAULT_CONVERSATION_PREFS,
     isConversationMuted: () => false,
@@ -685,6 +719,6 @@ export const useStreamContext = () =>
     isCallMutedLive: () => false,
     toggleConversationMute: () => false,
     toggleNotificationMute: () => false,
-    updateConversationCallSetting: () => {},
+    updateConversationCallSetting: () => { },
   };
 
