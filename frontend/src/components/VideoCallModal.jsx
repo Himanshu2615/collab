@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StreamVideoClient, StreamCall, StreamVideo, SpeakerLayout } from '@stream-io/video-react-sdk';
 import {
+  DownloadIcon,
+  InfoIcon,
   MessageSquareIcon,
+  MonitorUpIcon,
   MicIcon,
   MicOffIcon,
+  MoreHorizontalIcon,
   PenToolIcon,
   PhoneOffIcon,
   RadioIcon,
+  UsersIcon,
   SendIcon,
   Trash2Icon,
   VideoIcon,
@@ -15,6 +20,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import '@stream-io/video-react-sdk/dist/css/styles.css';
+import Avatar from './Avatar';
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 const CALL_CHAT_EVENT = 'bizzcolab.call.chat';
@@ -58,6 +64,8 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const [selectedCameraId, setSelectedCameraId] = useState('');
   const [selectedSpeakerId, setSelectedSpeakerId] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [activeSidebarTab, setActiveSidebarTab] = useState('chat');
+  const [activeStageTab, setActiveStageTab] = useState('whiteboard');
   const [showWhiteboardPopup, setShowWhiteboardPopup] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
@@ -75,9 +83,13 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const customUnsubscribeRef = useRef(null);
   const draftStrokeRef = useRef(null);
 
-  useEffect(() => {
-    draftStrokeRef.current = draftStroke;
-  }, [draftStroke]);
+  const updateDraftStroke = (updater) => {
+    setDraftStroke((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      draftStrokeRef.current = next;
+      return next;
+    });
+  };
 
   useEffect(() => {
     const shouldEnableCamera = callType === 'video';
@@ -91,7 +103,10 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       setChatInput('');
       setWhiteboardStrokes([]);
       setDraftStroke(null);
+      draftStrokeRef.current = null;
       setIsSidebarOpen(true);
+      setActiveSidebarTab('chat');
+      setActiveStageTab('whiteboard');
       setShowWhiteboardPopup(false);
       setBrushColor(WHITEBOARD_COLORS[0]);
       setBrushWidth(3);
@@ -107,7 +122,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       el.scrollLeft = Math.max(0, (boardSize.width - el.clientWidth) / 2);
       el.scrollTop = Math.max(0, (boardSize.height - el.clientHeight) / 2);
     });
-  }, [showWhiteboardPopup, boardSize.width, boardSize.height]);
+  }, [showWhiteboardPopup]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -507,7 +522,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
     event.currentTarget.setPointerCapture?.(event.pointerId);
     setIsDrawing(true);
-    setDraftStroke({
+    updateDraftStroke({
       id: createEventId(),
       userId: user._id,
       userName: user.fullName,
@@ -524,7 +539,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
     ensureBoardSizeForPoints([point]);
 
-    setDraftStroke((prev) => {
+    updateDraftStroke((prev) => {
       if (!prev) return prev;
       const last = prev.points[prev.points.length - 1];
       if (last && Math.abs(last.x - point.x) < 0.0025 && Math.abs(last.y - point.y) < 0.0025) {
@@ -544,7 +559,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     const stroke = draftStrokeRef.current;
 
     if (!stroke?.points?.length) {
-      setDraftStroke(null);
+      updateDraftStroke(null);
       return;
     }
 
@@ -557,12 +572,12 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       toast.error('Failed to sync whiteboard stroke');
     }
 
-    setDraftStroke(null);
+    updateDraftStroke(null);
   };
 
   const clearWhiteboard = async () => {
     setWhiteboardStrokes([]);
-    setDraftStroke(null);
+    updateDraftStroke(null);
     try {
       await sendCustomCallEvent({ type: WHITEBOARD_CLEAR_EVENT, userId: user._id });
     } catch (error) {
@@ -575,6 +590,17 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     () => (draftStroke ? [...whiteboardStrokes, draftStroke] : whiteboardStrokes),
     [draftStroke, whiteboardStrokes]
   );
+
+  const workspaceLabel = user?.organization?.name || 'Organization Platform';
+  const sessionLabel = participantNames.length ? participantNames.join(', ') : 'Call Session';
+  const meetingRoster = useMemo(() => {
+    const names = Array.from(new Set([user?.fullName, ...participantNames].filter(Boolean)));
+    return names.map((name, index) => ({
+      id: participantIds[index] || `${name}-${index}`,
+      name,
+      isYou: name === user?.fullName,
+    }));
+  }, [participantIds, participantNames, user?.fullName]);
 
   if (!isOpen) return null;
 
@@ -593,38 +619,141 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
         {client && call ? (
           <StreamVideo client={client}>
             <StreamCall call={call}>
-              <div className="flex h-full flex-col bg-base-300 sm:rounded-3xl overflow-hidden border border-base-200 xl:flex-row">
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-base-200 bg-base-100 px-4 py-4 sm:px-5">
-                    <div className="min-w-0 flex-1">
-                      <div className="badge badge-outline mb-2">{callType === 'video' ? 'Live video call' : 'Live voice call'}</div>
-                      <h3 className="truncate text-base font-bold text-base-content sm:text-lg">
-                        {participantNames.length ? participantNames.join(', ') : 'Team call'}
-                      </h3>
-                      <p className="text-sm text-base-content/55">
-                        Use chat and whiteboard tools without leaving the meeting.
-                      </p>
+              <div className="relative flex h-full flex-col overflow-hidden bg-[#eef2f7] text-base-content sm:rounded-3xl">
+                <div className="flex items-center justify-between gap-3 border-b border-base-300 bg-base-100 px-4 py-3 sm:px-5">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-3 text-sm font-semibold">
+                      <span className="inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
+                      <span className="truncate">{workspaceLabel}</span>
+                      <span className="text-base-content/25">|</span>
+                      <span className="truncate text-base-content/55">{sessionLabel}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button className="btn btn-ghost btn-sm btn-square"><InfoIcon className="size-4" /></button>
+                    <button className="btn btn-ghost btn-sm btn-square"><MoreHorizontalIcon className="size-4" /></button>
+                  </div>
+                </div>
+
+                <div className="grid min-h-0 flex-1 xl:grid-cols-[minmax(0,1fr)_320px]">
+                  <div className="flex min-h-0 flex-col p-3 sm:p-4">
+                    <div className="flex items-center justify-between rounded-t-2xl border border-b-0 border-base-300 bg-base-100 px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setActiveStageTab('whiteboard')}
+                          className={`btn btn-sm gap-2 ${activeStageTab === 'whiteboard' ? 'btn-primary' : 'btn-ghost'}`}
+                        >
+                          <PenToolIcon className="size-4" /> Shared Whiteboard
+                        </button>
+                        <button
+                          onClick={() => setActiveStageTab('meeting')}
+                          className={`btn btn-sm gap-2 ${activeStageTab === 'meeting' ? 'btn-primary' : 'btn-ghost'}`}
+                        >
+                          <MonitorUpIcon className="size-4" /> Meeting Stage
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {activeStageTab === 'whiteboard' && (
+                          <>
+                            <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm btn-square" title="Clear whiteboard">
+                              <Trash2Icon className="size-4" />
+                            </button>
+                            <button onClick={() => setShowWhiteboardPopup(true)} className="btn btn-ghost btn-sm btn-square" title="Open whiteboard popup">
+                              <MonitorUpIcon className="size-4" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                const blob = new Blob([JSON.stringify(whiteboardStrokes, null, 2)], { type: 'application/json' });
+                                const url = URL.createObjectURL(blob);
+                                const link = document.createElement('a');
+                                link.href = url;
+                                link.download = `whiteboard-${callId}.json`;
+                                link.click();
+                                URL.revokeObjectURL(url);
+                              }}
+                              className="btn btn-ghost btn-sm btn-square"
+                              title="Export whiteboard"
+                            >
+                              <DownloadIcon className="size-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
 
-                    <button
-                      onClick={() => setIsSidebarOpen((prev) => !prev)}
-                      className="btn btn-ghost btn-sm gap-2 self-center xl:self-auto"
-                    >
-                      {isSidebarOpen ? <XIcon className="size-4" /> : <MessageSquareIcon className="size-4" />}
-                      {isSidebarOpen ? 'Hide tools' : 'Show tools'}
-                    </button>
-                  </div>
+                    <div className="relative min-h-0 flex-1 overflow-hidden rounded-b-2xl border border-base-300 bg-white shadow-sm">
+                      {activeStageTab === 'whiteboard' ? (
+                        showWhiteboardPopup ? (
+                          <div className="flex h-full items-center justify-center bg-base-100 px-6 text-center text-base-content/55">
+                            <div>
+                              <PenToolIcon className="mx-auto mb-3 size-8 text-primary" />
+                              <p className="font-semibold">Whiteboard opened in popup</p>
+                              <p className="mt-1 text-sm">Use the larger workspace for sketching while keeping chat beside the meeting.</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div ref={whiteboardScrollRef} className="h-full overflow-auto bg-[#fbfcff] p-4">
+                            <div
+                              ref={whiteboardRef}
+                              className="relative rounded-[28px] border border-base-300 bg-white shadow-inner touch-none"
+                              style={{ width: `${boardSize.width}px`, height: `${boardSize.height}px` }}
+                              onPointerDown={startDrawing}
+                              onPointerMove={continueDrawing}
+                              onPointerUp={stopDrawing}
+                              onPointerLeave={stopDrawing}
+                            >
+                              <div
+                                className="absolute inset-0 opacity-40"
+                                style={{
+                                  backgroundImage: 'radial-gradient(circle, rgba(148,163,184,0.25) 1px, transparent 1px)',
+                                  backgroundSize: '22px 22px',
+                                }}
+                              />
+                              <svg className="pointer-events-none absolute inset-0 h-full w-full">
+                                {renderedStrokes.map((stroke) => (
+                                  <path
+                                    key={stroke.id}
+                                    d={pointsToSvgPath(stroke.points)}
+                                    fill="none"
+                                    stroke={stroke.color}
+                                    strokeWidth={stroke.width}
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                ))}
+                              </svg>
+                              {renderedStrokes.length === 0 && (
+                                <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-center text-base-content/35">
+                                  <div>
+                                    <PenToolIcon className="mx-auto mb-3 size-10" />
+                                    <p className="font-medium">Start drawing on the whiteboard</p>
+                                    <p className="mt-1 text-sm">This canvas expands as you move toward the edges.</p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      ) : (
+                        <div className="relative h-full overflow-hidden bg-slate-950">
+                          <SpeakerLayout />
+                        </div>
+                      )}
 
-                  <div className={`relative bg-slate-950 ${isSidebarOpen ? 'min-h-[38vh] xl:min-h-0' : 'min-h-[50vh] xl:min-h-0'} flex-1`}>
-                    <SpeakerLayout />
-                  </div>
+                      {activeStageTab === 'whiteboard' && callType === 'video' && (
+                        <div className="absolute bottom-4 right-4 h-24 w-40 overflow-hidden rounded-2xl border border-white/15 bg-slate-950 shadow-xl">
+                          <SpeakerLayout />
+                        </div>
+                      )}
+                    </div>
 
-                  <div className="border-t border-base-200 bg-base-100 px-3 py-3 sm:px-4 sm:py-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-2">
+                    <div className="pointer-events-none absolute inset-x-0 bottom-20 z-20 px-3 sm:bottom-24 sm:px-4">
+                      <div className="pointer-events-auto mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-black/55 p-2 shadow-xl backdrop-blur-md sm:gap-3 sm:px-4">
                         <button
                           onClick={toggleInCallMicrophone}
-                          className={`btn btn-sm gap-2 ${isInCallMicEnabled ? 'btn-primary' : 'btn-outline'}`}
+                          className={`btn btn-sm gap-2 ${isInCallMicEnabled ? 'btn-primary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
                         >
                           {isInCallMicEnabled ? <MicIcon className="size-4" /> : <MicOffIcon className="size-4" />}
                           {isInCallMicEnabled ? 'Mute' : 'Unmute'}
@@ -633,7 +762,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                         {callType === 'video' && (
                           <button
                             onClick={toggleInCallCamera}
-                            className={`btn btn-sm gap-2 ${isInCallCamEnabled ? 'btn-primary' : 'btn-outline'}`}
+                            className={`btn btn-sm gap-2 ${isInCallCamEnabled ? 'btn-primary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
                           >
                             {isInCallCamEnabled ? <VideoIcon className="size-4" /> : <VideoOffIcon className="size-4" />}
                             {isInCallCamEnabled ? 'Camera on' : 'Camera off'}
@@ -642,42 +771,76 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
                         <button
                           onClick={toggleRecording}
-                          className={`btn btn-sm gap-2 ${isRecording ? 'btn-error' : 'btn-outline'}`}
+                          className={`btn btn-sm gap-2 ${isRecording ? 'btn-error' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
                         >
                           <RadioIcon className={`size-4 ${isRecording ? 'animate-pulse' : ''}`} />
                           {isRecording ? 'Stop recording' : 'Record'}
                         </button>
 
                         <button
-                          onClick={() => setIsSidebarOpen(true)}
-                          className={`btn btn-sm gap-2 ${isSidebarOpen ? 'btn-secondary' : 'btn-outline'}`}
+                          onClick={() => {
+                            setIsSidebarOpen(true);
+                            setActiveSidebarTab('chat');
+                          }}
+                          className={`btn btn-sm gap-2 ${isSidebarOpen && activeSidebarTab === 'chat' ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
                         >
                           <MessageSquareIcon className="size-4" /> Chat
                         </button>
 
                         <button
                           onClick={() => {
-                            setShowWhiteboardPopup(true);
+                            setIsSidebarOpen(true);
+                            setActiveSidebarTab('participants');
                           }}
-                          className={`btn btn-sm gap-2 ${showWhiteboardPopup ? 'btn-secondary' : 'btn-outline'}`}
+                          className={`btn btn-sm gap-2 ${isSidebarOpen && activeSidebarTab === 'participants' ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
                         >
-                          <PenToolIcon className="size-4" /> Whiteboard
+                          <UsersIcon className="size-4" /> Participants
+                        </button>
+
+                        <button
+                          onClick={() => setShowWhiteboardPopup(true)}
+                          className={`btn btn-sm gap-2 ${showWhiteboardPopup ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
+                        >
+                          <PenToolIcon className="size-4" /> Pop out board
+                        </button>
+
+                        <button onClick={leaveCurrentCall} className="btn btn-error btn-sm gap-2">
+                          <PhoneOffIcon className="size-4" /> End call
                         </button>
                       </div>
+                    </div>
 
-                      <button onClick={leaveCurrentCall} className="btn btn-error btn-sm gap-2">
-                        <PhoneOffIcon className="size-4" /> End call
-                      </button>
+                    <div className="mt-auto flex gap-3 overflow-x-auto px-1 pt-4">
+                      {meetingRoster.map((member) => (
+                        <div key={member.id} className="min-w-[132px] rounded-2xl border border-base-300 bg-base-100 p-2 shadow-sm">
+                          <div className="flex items-center gap-2">
+                            <Avatar name={member.name} size="w-10 h-10" />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold">{member.isYou ? 'You' : member.name}</p>
+                              <p className="text-[11px] text-base-content/50">{member.isYou ? 'Local preview' : 'In meeting'}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
 
-                {isSidebarOpen && (
-                  <aside className="flex w-full flex-col border-t border-base-200 bg-base-100 xl:h-full xl:max-w-[380px] xl:border-l xl:border-t-0">
+                  {isSidebarOpen && (
+                    <aside className="flex min-h-0 w-full flex-col border-t border-base-200 bg-base-100 xl:border-l xl:border-t-0">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-base-200 px-4 py-4">
-                      <div>
-                        <p className="text-sm font-semibold text-base-content">In-call chat</p>
-                        <p className="text-xs text-base-content/50">Share notes with everyone in the meeting.</p>
+                        <div className="tabs tabs-boxed bg-base-200/70 p-1">
+                          <button
+                            onClick={() => setActiveSidebarTab('chat')}
+                            className={`tab tab-sm ${activeSidebarTab === 'chat' ? 'tab-active' : ''}`}
+                          >
+                            In-Meet Chat
+                          </button>
+                          <button
+                            onClick={() => setActiveSidebarTab('participants')}
+                            className={`tab tab-sm ${activeSidebarTab === 'participants' ? 'tab-active' : ''}`}
+                          >
+                            Participants ({meetingRoster.length})
+                          </button>
                       </div>
                       <button onClick={() => setIsSidebarOpen(false)} className="btn btn-ghost btn-sm btn-circle self-start">
                         <XIcon className="size-4" />
@@ -685,50 +848,68 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                     </div>
 
                     <div className="flex min-h-0 flex-1 flex-col">
-                      <div className="max-h-[36vh] flex-1 space-y-3 overflow-y-auto px-4 py-4 xl:max-h-none">
-                        {chatMessages.length === 0 ? (
-                          <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/50 p-6 text-center">
-                            <MessageSquareIcon className="mx-auto mb-3 size-8 text-base-content/25" />
-                            <p className="font-medium text-base-content/70">No messages yet</p>
-                            <p className="mt-1 text-sm text-base-content/50">Share links, notes, or quick decisions during the call.</p>
-                          </div>
-                        ) : (
-                          chatMessages.map((message) => {
-                            const isOwn = message.userId === user._id;
-                            return (
-                              <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${isOwn ? 'bg-primary text-primary-content' : 'bg-base-200 text-base-content'}`}>
-                                  <p className={`text-[11px] font-semibold uppercase tracking-wide ${isOwn ? 'text-primary-content/70' : 'text-base-content/45'}`}>
-                                    {isOwn ? 'You' : message.userName}
-                                  </p>
-                                  <p className="mt-1 whitespace-pre-wrap break-words text-sm">{message.text}</p>
+                        {activeSidebarTab === 'chat' ? (
+                          <>
+                            <div className="max-h-[28vh] flex-1 space-y-3 overflow-y-auto px-4 py-4 xl:max-h-none">
+                              {chatMessages.length === 0 ? (
+                                <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/50 p-6 text-center">
+                                  <MessageSquareIcon className="mx-auto mb-3 size-8 text-base-content/25" />
+                                  <p className="font-medium text-base-content/70">No messages yet</p>
+                                  <p className="mt-1 text-sm text-base-content/50">Share links, notes, or quick decisions during the call.</p>
                                 </div>
-                              </div>
-                            );
-                          })
-                        )}
-                        <div ref={messagesEndRef} />
-                      </div>
+                              ) : (
+                                chatMessages.map((message) => {
+                                  const isOwn = message.userId === user._id;
+                                  return (
+                                    <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                                      <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${isOwn ? 'bg-primary text-primary-content' : 'bg-base-200 text-base-content'}`}>
+                                        <p className={`text-[11px] font-semibold uppercase tracking-wide ${isOwn ? 'text-primary-content/70' : 'text-base-content/45'}`}>
+                                          {isOwn ? 'Me' : message.userName}
+                                        </p>
+                                        <p className="mt-1 whitespace-pre-wrap break-words text-sm">{message.text}</p>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                              <div ref={messagesEndRef} />
+                            </div>
 
-                      <div className="border-t border-base-200 p-4">
-                        <div className="flex items-end gap-2">
-                          <textarea
-                            value={chatInput}
-                            onChange={(event) => setChatInput(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' && !event.shiftKey) {
-                                event.preventDefault();
-                                handleSendChatMessage();
-                              }
-                            }}
-                            className="textarea textarea-bordered min-h-[88px] flex-1 resize-none"
-                            placeholder="Type a message for everyone in the call…"
-                          />
-                          <button onClick={handleSendChatMessage} className="btn btn-primary btn-square">
-                            <SendIcon className="size-4" />
-                          </button>
-                        </div>
-                      </div>
+                            <div className="border-t border-base-200 p-4">
+                              <div className="flex items-end gap-2">
+                                <textarea
+                                  value={chatInput}
+                                  onChange={(event) => setChatInput(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' && !event.shiftKey) {
+                                      event.preventDefault();
+                                      handleSendChatMessage();
+                                    }
+                                  }}
+                                  className="textarea textarea-bordered min-h-[88px] flex-1 resize-none"
+                                  placeholder="Type a message..."
+                                />
+                                <button onClick={handleSendChatMessage} className="btn btn-primary btn-square">
+                                  <SendIcon className="size-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex-1 overflow-y-auto px-4 py-4">
+                            <div className="space-y-3">
+                              {meetingRoster.map((member, index) => (
+                                <div key={`${member.id}-${index}`} className="flex items-center gap-3 rounded-2xl border border-base-300 bg-base-100 px-3 py-3 shadow-sm">
+                                  <Avatar name={member.name} size="w-10 h-10" />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-semibold">{member.isYou ? 'You' : member.name}</p>
+                                    <p className="text-xs text-base-content/50">{member.isYou ? 'Organizer view' : 'Connected participant'}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                     </div>
                   </aside>
                 )}
@@ -788,7 +969,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                         onPointerUp={stopDrawing}
                         onPointerLeave={stopDrawing}
                       >
-                        <svg className="absolute inset-0 h-full w-full">
+                        <svg className="pointer-events-none absolute inset-0 h-full w-full">
                           {renderedStrokes.map((stroke) => (
                             <path
                               key={stroke.id}
@@ -803,7 +984,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                         </svg>
 
                         {renderedStrokes.length === 0 && (
-                          <div className="absolute inset-0 flex items-center justify-center text-center text-base-content/35">
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-center text-base-content/35">
                             <div>
                               <PenToolIcon className="mx-auto mb-3 size-10" />
                               <p className="font-medium">Start drawing on the whiteboard</p>
@@ -816,6 +997,7 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                   </div>
                 </div>
               )}
+              </div>
             </StreamCall>
           </StreamVideo>
         ) : (
