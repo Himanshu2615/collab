@@ -2,6 +2,7 @@ import User from "../models/User.js";
 import FriendRequest from "../models/FriendRequest.js";
 import File from "../models/File.js";
 import Meeting from "../models/Meeting.js";
+import mongoose from "mongoose";
 
 const getTodayRange = () => {
   const start = new Date();
@@ -117,6 +118,59 @@ export async function getMyFriends(req, res) {
   }
 }
 
+export async function lookupUserById(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid user ID" });
+    }
+
+    if (id === req.user.id) {
+      return res.status(400).json({ message: "You cannot look up yourself" });
+    }
+
+    const user = await User.findById(id)
+      .select("_id fullName profilePic nativeLanguage learningLanguage bio location organization")
+      .lean();
+
+    if (!user || !user.fullName) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (req.user.friends?.some((friendId) => friendId.toString() === id)) {
+      return res.status(200).json({
+        success: true,
+        user: {
+          ...user,
+          isFriend: true,
+          sameOrganization: !!(req.user.organization && user.organization && req.user.organization.toString() === user.organization.toString()),
+        },
+      });
+    }
+
+    const existingRequest = await FriendRequest.findOne({
+      $or: [
+        { sender: req.user.id, recipient: id },
+        { sender: id, recipient: req.user.id },
+      ],
+    }).select("status sender recipient").lean();
+
+    res.status(200).json({
+      success: true,
+      user: {
+        ...user,
+        isFriend: false,
+        sameOrganization: !!(req.user.organization && user.organization && req.user.organization.toString() === user.organization.toString()),
+      },
+      existingRequest,
+    });
+  } catch (error) {
+    console.error("Error in lookupUserById controller", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+}
+
 export async function sendFriendRequest(req, res) {
   try {
     const myId = req.user.id;
@@ -140,13 +194,6 @@ export async function sendFriendRequest(req, res) {
 
     if (!recipient) {
       return res.status(404).json({ message: "Recipient not found" });
-    }
-
-    // Org isolation: prevent cross-org friend requests (use req.user from middleware)
-    if (req.user.organization && recipient.organization) {
-      if (req.user.organization.toString() !== recipient.organization.toString()) {
-        return res.status(403).json({ message: "You can only connect with members of your organization" });
-      }
     }
 
     // check if user is already friends

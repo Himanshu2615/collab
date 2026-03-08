@@ -8,6 +8,7 @@ import {
   getMyFriends,
   getOutgoingFriendReqs,
   getRecommendedUsers,
+  lookupUserById,
   sendFriendRequest,
 } from "../controllers/user.controller.js";
 
@@ -18,6 +19,7 @@ const router = express.Router();
 router.use(protectRoute);
 
 router.get("/dashboard-summary", getDashboardSummary);
+router.get("/lookup/:id", lookupUserById);
 router.get("/", getRecommendedUsers);
 router.get("/friends", getMyFriends);
 

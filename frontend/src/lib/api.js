@@ -102,6 +102,11 @@ export async function getUserFriends() {
   return response.data;
 }
 
+export async function lookupUserById(userId) {
+  const response = await axiosInstance.get(`/users/lookup/${userId}`);
+  return response.data;
+}
+
 export async function getDashboardSummary() {
   try {
     const response = await axiosInstance.get("/users/dashboard-summary");

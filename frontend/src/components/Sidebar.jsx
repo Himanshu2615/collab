@@ -449,7 +449,7 @@ const Sidebar = () => {
         {/* APPS */}
         <SectionLabel label="Apps" />
         <AppItem to="/files"    icon={FileTextIcon} label="Files"          currentPath={pathname} />
-        <AppItem to="/friends"  icon={UsersIcon}    label="Team Directory" currentPath={pathname} />
+        <AppItem to="/friends"  icon={UsersIcon}    label="Team & Friends" currentPath={pathname} />
         <AppItem to="/schedule" icon={VideoIcon}    label="Meetings"       currentPath={pathname} />
         {isAdmin && (
           <AppItem to="/admin" icon={SettingsIcon} label="Settings" currentPath={pathname} />
