@@ -12,6 +12,11 @@ const COLORS = [
     { bg: "#fce4ec", text: "#c2185b" }, // pink
 ];
 
+const BLOCKED_AVATAR_HOSTS = new Set([
+    "ui-avatars.com",
+    "www.ui-avatars.com",
+]);
+
 /**
  * Returns true when the value is a displayable photo URL or data URI.
  * Rejects only empty / blank values.
@@ -20,7 +25,8 @@ export function isValidAvatarUrl(url) {
     if (!url || !url.trim()) return false;
     if (url.startsWith("data:")) return true; // base64 upload — always valid
     try {
-        const { protocol } = new URL(url);
+        const { protocol, hostname } = new URL(url);
+        if (BLOCKED_AVATAR_HOSTS.has(hostname)) return false;
         return protocol === "http:" || protocol === "https:";
     } catch {
         return false;

@@ -4,10 +4,34 @@ import Avatar from './Avatar';
 
 const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, callerImage, callType = 'video', ringtoneVolume = 0.6, vibrate = true }) => {
   const [ringingTime, setRingingTime] = useState(0);
+  const [canPlayAlert, setCanPlayAlert] = useState(false);
   const audioContextRef = useRef(null);
 
   useEffect(() => {
     if (!isOpen) return;
+
+    const hasUserActivation = Boolean(
+      navigator.userActivation?.hasBeenActive || navigator.userActivation?.isActive
+    );
+
+    if (hasUserActivation) {
+      setCanPlayAlert(true);
+      return;
+    }
+
+    const enableAlerts = () => setCanPlayAlert(true);
+
+    window.addEventListener('pointerdown', enableAlerts, { once: true, passive: true });
+    window.addEventListener('keydown', enableAlerts, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', enableAlerts);
+      window.removeEventListener('keydown', enableAlerts);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !canPlayAlert) return;
 
     const playTone = () => {
       try {
@@ -54,12 +78,18 @@ const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, cal
     return () => {
       clearInterval(ringLoop);
       clearInterval(interval);
-      if (navigator.vibrate) navigator.vibrate(0);
+      if (canPlayAlert && navigator.vibrate) navigator.vibrate(0);
       audioContextRef.current?.close?.();
       audioContextRef.current = null;
       setRingingTime(0);
     };
-  }, [isOpen, ringtoneVolume, vibrate]);
+  }, [canPlayAlert, isOpen, ringtoneVolume, vibrate]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setCanPlayAlert(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -110,8 +140,13 @@ const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, cal
               </span>
               <span className="badge badge-outline gap-1">
                 <SmartphoneIcon className="size-3.5" />
-                {vibrate ? 'Vibrate on' : 'Vibrate off'}
+                {vibrate ? (canPlayAlert ? 'Vibrate on' : 'Vibrate blocked until tap') : 'Vibrate off'}
               </span>
+              {!canPlayAlert && (
+                <span className="badge badge-outline gap-1">
+                  Tap to enable ringtone
+                </span>
+              )}
             </div>
           </div>
 

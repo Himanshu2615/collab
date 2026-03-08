@@ -36,6 +36,8 @@ const Avatar = ({ src, name, size = "w-10 h-10", rounded = "rounded-full", class
                     src={src}
                     alt={name}
                     className="absolute inset-0 w-full h-full object-cover"
+                    crossOrigin="anonymous"
+                    referrerPolicy="no-referrer"
                     onError={(e) => { e.target.style.display = "none"; }}
                 />
             )}

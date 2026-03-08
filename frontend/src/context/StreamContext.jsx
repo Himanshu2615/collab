@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { getStreamToken } from "../lib/api";
 import useAuthUser from "../hooks/useAuthUser";
 import Avatar from "../components/Avatar";
+import { isValidAvatarUrl } from "../lib/avatarUtils";
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 const StreamContext = createContext(null);
@@ -51,6 +52,9 @@ const msgPreview = (message) => {
   if (message.attachments && message.attachments.length) return "📎 Attachment";
   return "";
 };
+
+const sanitizeStreamImage = (imageUrl) =>
+  isValidAvatarUrl(imageUrl || "") ? imageUrl : "";
 
 const MUTED_CONVERSATIONS_KEY = "collab_muted_conversations";
 const NOTIFICATION_PREFS_KEY = "collab_notification_preferences";
@@ -334,7 +338,7 @@ export const StreamProvider = ({ children }) => {
               (t) => (
                 <MsgToast
                   t={t}
-                  avatar={sender?.image}
+                  avatar={sanitizeStreamImage(sender?.image)}
                   senderName={senderName}
                   text={txt}
                   partnerId={partnerId}
@@ -348,7 +352,7 @@ export const StreamProvider = ({ children }) => {
               try {
                 const n = new Notification(senderName, {
                   body: txt,
-                  icon: sender?.image || "/favicon.ico",
+                  icon: sanitizeStreamImage(sender?.image) || "/favicon.ico",
                   tag:  `dm-${partnerId}`,   // collapses multiple messages from same person
                   renotify: true,
                 });
@@ -391,7 +395,7 @@ export const StreamProvider = ({ children }) => {
                 lastMsgAt:       message?.created_at || new Date().toISOString(),
                 lastMsgSenderId: sender?.id || null,
                 partnerName:  partnerInfo?.name  || prev[partnerId]?.partnerName  || partnerId,
-                partnerImage: partnerInfo?.image || prev[partnerId]?.partnerImage || "",
+                partnerImage: sanitizeStreamImage(partnerInfo?.image) || prev[partnerId]?.partnerImage || "",
               },
             };
           });
@@ -485,7 +489,7 @@ export const StreamProvider = ({ children }) => {
                   lastMsgAt: last?.created_at || ch.data?.last_message_at || null,
                   lastMsgSenderId: last?.user?.id || null,
                   partnerName: partnerUser?.name || partnerUser?.id || "Unknown",
-                  partnerImage: partnerUser?.image || "",
+                  partnerImage: sanitizeStreamImage(partnerUser?.image) || "",
                 };
               }
               setDmMeta(meta);
@@ -550,8 +554,22 @@ export const StreamProvider = ({ children }) => {
       if (!selfId || !partnerId) return;
 
       const channelId = [selfId, partnerId].sort().join("-");
-      const channel = client.channel("messaging", channelId);
-      await channel.markRead();
+      const cid = `messaging:${channelId}`;
+      const activeChannel = client.activeChannels?.[cid];
+      const channel = activeChannel || client.channel("messaging", channelId, {
+        members: [selfId, partnerId],
+      });
+
+      try {
+        await channel.markRead();
+      } catch (err) {
+        if (!/hasn't been initialized yet/i.test(String(err?.message || ""))) {
+          throw err;
+        }
+
+        await channel.watch();
+        await channel.markRead();
+      }
     } catch (err) {
       console.warn("[StreamContext] Failed to mark channel as read in SDK:", err);
     }
