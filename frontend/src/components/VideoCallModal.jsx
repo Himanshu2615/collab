@@ -1,10 +1,35 @@
-import { useEffect, useRef, useState } from 'react';
-import { StreamVideoClient, StreamCall, StreamVideo, CallControls, SpeakerLayout } from '@stream-io/video-react-sdk';
-import { MicIcon, MicOffIcon, RadioIcon, VideoIcon, VideoOffIcon, XIcon } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { StreamVideoClient, StreamCall, StreamVideo, SpeakerLayout } from '@stream-io/video-react-sdk';
+import {
+  MessageSquareIcon,
+  MicIcon,
+  MicOffIcon,
+  PenToolIcon,
+  PhoneOffIcon,
+  RadioIcon,
+  SendIcon,
+  Trash2Icon,
+  VideoIcon,
+  VideoOffIcon,
+  XIcon,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import '@stream-io/video-react-sdk/dist/css/styles.css';
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
+const CALL_CHAT_EVENT = 'bizzcolab.call.chat';
+const WHITEBOARD_STROKE_EVENT = 'bizzcolab.call.whiteboard.stroke';
+const WHITEBOARD_CLEAR_EVENT = 'bizzcolab.call.whiteboard.clear';
+const WHITEBOARD_COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f97316', '#ef4444', '#111827'];
+
+const createEventId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+
+const pointsToSvgPath = (points = []) => {
+  if (!points.length) return '';
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x * 100}% ${point.y * 100}%`).join(' ');
+};
 
 const getOrgSlug = (user) => {
   if (!user?.organization) return null;
@@ -19,6 +44,8 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const [isJoining, setIsJoining] = useState(false);
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isCamEnabled, setIsCamEnabled] = useState(callType === 'video');
+  const [isInCallMicEnabled, setIsInCallMicEnabled] = useState(true);
+  const [isInCallCamEnabled, setIsInCallCamEnabled] = useState(callType === 'video');
   const [previewStream, setPreviewStream] = useState(null);
   const [previewError, setPreviewError] = useState('');
   const [audioDevices, setAudioDevices] = useState([]);
@@ -27,12 +54,38 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
   const [selectedMicId, setSelectedMicId] = useState('');
   const [selectedCameraId, setSelectedCameraId] = useState('');
   const [selectedSpeakerId, setSelectedSpeakerId] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [activePanel, setActivePanel] = useState('chat');
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [whiteboardStrokes, setWhiteboardStrokes] = useState([]);
+  const [draftStroke, setDraftStroke] = useState(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [brushColor, setBrushColor] = useState(WHITEBOARD_COLORS[0]);
+  const [brushWidth, setBrushWidth] = useState(3);
   const callRef = useRef(null);
   const previewVideoRef = useRef(null);
+  const whiteboardRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const customUnsubscribeRef = useRef(null);
 
   useEffect(() => {
     setIsCamEnabled(callType === 'video');
+    setIsInCallCamEnabled(callType === 'video');
   }, [callType, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setChatMessages([]);
+      setChatInput('');
+      setWhiteboardStrokes([]);
+      setDraftStroke(null);
+      setIsSidebarOpen(true);
+      setActivePanel('chat');
+      setBrushColor(WHITEBOARD_COLORS[0]);
+      setBrushWidth(3);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -128,6 +181,8 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
 
     return () => {
       const currentCall = callRef.current;
+      customUnsubscribeRef.current?.();
+      customUnsubscribeRef.current = null;
       if (currentCall) {
         updateCallLog(callId, { endTime: new Date().toISOString(), status: 'ended' });
         currentCall.leave().catch(() => {});
@@ -137,6 +192,8 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       setClient(null);
       setIsRecording(false);
       setIsJoining(false);
+      setIsInCallMicEnabled(true);
+      setIsInCallCamEnabled(callType === 'video');
       setSpeakerDevices([]);
       setSelectedSpeakerId('');
       setPreviewStream((current) => {
@@ -146,6 +203,51 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, callId, token, user]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  const sendCustomCallEvent = async (payload) => {
+    const activeCall = callRef.current || call;
+    if (!activeCall) return;
+    await activeCall.sendCustomEvent(payload);
+  };
+
+  const appendChatMessage = (message) => {
+    if (!message?.id) return;
+    setChatMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
+  };
+
+  const appendWhiteboardStroke = (stroke) => {
+    if (!stroke?.id || !stroke?.points?.length) return;
+    setWhiteboardStrokes((prev) => (prev.some((item) => item.id === stroke.id) ? prev : [...prev, stroke]));
+  };
+
+  const registerCustomEventHandlers = (activeCall) => {
+    customUnsubscribeRef.current?.();
+    customUnsubscribeRef.current = activeCall.on('custom', (event) => {
+      const custom = event.custom;
+      if (!custom?.type) return;
+
+      if (custom.type === CALL_CHAT_EVENT) {
+        const message = custom.message;
+        if (!message || message.userId === user?._id) return;
+        appendChatMessage(message);
+      }
+
+      if (custom.type === WHITEBOARD_STROKE_EVENT) {
+        const stroke = custom.stroke;
+        if (!stroke || stroke.userId === user?._id) return;
+        appendWhiteboardStroke(stroke);
+      }
+
+      if (custom.type === WHITEBOARD_CLEAR_EVENT && custom.userId !== user?._id) {
+        setWhiteboardStrokes([]);
+        setDraftStroke(null);
+      }
+    });
+  };
 
   const joinCall = async () => {
     if (isJoining || call) return;
@@ -204,7 +306,10 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
       if (!isMicEnabled) await videoCall.microphone.disable();
       if (callType === 'video' && !isCamEnabled) await videoCall.camera.disable();
 
+      registerCustomEventHandlers(videoCall);
       setCall(videoCall);
+      setIsInCallMicEnabled(isMicEnabled);
+      setIsInCallCamEnabled(callType === 'video' ? isCamEnabled : false);
       setPreviewStream((current) => {
         current?.getTracks().forEach((track) => track.stop());
         return null;
@@ -270,6 +375,160 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
     }
   };
 
+  const toggleInCallMicrophone = async () => {
+    const activeCall = callRef.current || call;
+    if (!activeCall) return;
+
+    try {
+      if (isInCallMicEnabled) {
+        await activeCall.microphone.disable();
+        setIsInCallMicEnabled(false);
+      } else {
+        await activeCall.microphone.enable();
+        if (selectedMicId) await activeCall.microphone.select(selectedMicId);
+        setIsInCallMicEnabled(true);
+      }
+    } catch (error) {
+      console.error('Microphone toggle error:', error);
+      toast.error('Could not update microphone state');
+    }
+  };
+
+  const toggleInCallCamera = async () => {
+    const activeCall = callRef.current || call;
+    if (!activeCall || callType !== 'video') return;
+
+    try {
+      if (isInCallCamEnabled) {
+        await activeCall.camera.disable();
+        setIsInCallCamEnabled(false);
+      } else {
+        await activeCall.camera.enable();
+        if (selectedCameraId) await activeCall.camera.select(selectedCameraId);
+        setIsInCallCamEnabled(true);
+      }
+    } catch (error) {
+      console.error('Camera toggle error:', error);
+      toast.error('Could not update camera state');
+    }
+  };
+
+  const leaveCurrentCall = async () => {
+    const activeCall = callRef.current || call;
+    try {
+      await activeCall?.leave();
+    } catch (_) {
+      // noop
+    }
+    onClose?.();
+  };
+
+  const handleSendChatMessage = async () => {
+    const text = chatInput.trim();
+    if (!text) return;
+
+    const message = {
+      id: createEventId(),
+      text,
+      userId: user._id,
+      userName: user.fullName,
+      createdAt: new Date().toISOString(),
+    };
+
+    appendChatMessage(message);
+    setChatInput('');
+
+    try {
+      await sendCustomCallEvent({ type: CALL_CHAT_EVENT, message });
+    } catch (error) {
+      console.error('In-call chat send error:', error);
+      toast.error('Failed to send in-call message');
+    }
+  };
+
+  const getNormalizedPoint = (event) => {
+    const surface = whiteboardRef.current;
+    if (!surface) return null;
+    const rect = surface.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+
+    return {
+      x: clamp((event.clientX - rect.left) / rect.width),
+      y: clamp((event.clientY - rect.top) / rect.height),
+    };
+  };
+
+  const startDrawing = (event) => {
+    if (activePanel !== 'whiteboard') return;
+    const point = getNormalizedPoint(event);
+    if (!point) return;
+
+    setIsDrawing(true);
+    setDraftStroke({
+      id: createEventId(),
+      userId: user._id,
+      userName: user.fullName,
+      color: brushColor,
+      width: brushWidth,
+      points: [point],
+    });
+  };
+
+  const continueDrawing = (event) => {
+    if (!isDrawing) return;
+    const point = getNormalizedPoint(event);
+    if (!point) return;
+
+    setDraftStroke((prev) => {
+      if (!prev) return prev;
+      const last = prev.points[prev.points.length - 1];
+      if (last && Math.abs(last.x - point.x) < 0.0025 && Math.abs(last.y - point.y) < 0.0025) {
+        return prev;
+      }
+      return {
+        ...prev,
+        points: [...prev.points, point],
+      };
+    });
+  };
+
+  const stopDrawing = async () => {
+    if (!isDrawing) return;
+    setIsDrawing(false);
+
+    if (!draftStroke?.points?.length) {
+      setDraftStroke(null);
+      return;
+    }
+
+    appendWhiteboardStroke(draftStroke);
+
+    try {
+      await sendCustomCallEvent({ type: WHITEBOARD_STROKE_EVENT, stroke: draftStroke });
+    } catch (error) {
+      console.error('Whiteboard sync error:', error);
+      toast.error('Failed to sync whiteboard stroke');
+    }
+
+    setDraftStroke(null);
+  };
+
+  const clearWhiteboard = async () => {
+    setWhiteboardStrokes([]);
+    setDraftStroke(null);
+    try {
+      await sendCustomCallEvent({ type: WHITEBOARD_CLEAR_EVENT, userId: user._id });
+    } catch (error) {
+      console.error('Whiteboard clear sync error:', error);
+      toast.error('Failed to sync whiteboard clear');
+    }
+  };
+
+  const renderedStrokes = useMemo(
+    () => (draftStroke ? [...whiteboardStrokes, draftStroke] : whiteboardStrokes),
+    [draftStroke, whiteboardStrokes]
+  );
+
   if (!isOpen) return null;
 
   return (
@@ -287,26 +546,227 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
         {client && call ? (
           <StreamVideo client={client}>
             <StreamCall call={call}>
-              <div className="h-full flex flex-col bg-base-300 rounded-xl overflow-hidden">
-                <div className="flex-1 relative">
-                  <SpeakerLayout />
-                </div>
-                <div className="p-4 bg-base-100 flex items-center justify-between">
-                  <div className="flex-1">
-                    <CallControls onLeave={onClose} />
+              <div className="h-full flex bg-base-300 rounded-xl overflow-hidden border border-base-200">
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="flex items-center justify-between border-b border-base-200 bg-base-100 px-5 py-4">
+                    <div>
+                      <div className="badge badge-outline mb-2">{callType === 'video' ? 'Live video call' : 'Live voice call'}</div>
+                      <h3 className="text-lg font-bold text-base-content">
+                        {participantNames.length ? participantNames.join(', ') : 'Team call'}
+                      </h3>
+                      <p className="text-sm text-base-content/55">
+                        Use chat and whiteboard tools without leaving the meeting.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => setIsSidebarOpen((prev) => !prev)}
+                      className="btn btn-ghost btn-sm gap-2"
+                    >
+                      {isSidebarOpen ? <XIcon className="size-4" /> : <MessageSquareIcon className="size-4" />}
+                      {isSidebarOpen ? 'Hide tools' : 'Show tools'}
+                    </button>
                   </div>
-                  <button
-                    onClick={toggleRecording}
-                    className={`btn btn-sm gap-2 ${
-                      isRecording ? 'btn-error' : 'btn-ghost'
-                    }`}
-                  >
-                    <RadioIcon className={`size-4 ${
-                      isRecording ? 'animate-pulse' : ''
-                    }`} />
-                    {isRecording ? 'Stop Recording' : 'Record'}
-                  </button>
+
+                  <div className="relative min-h-0 flex-1 bg-slate-950">
+                    <SpeakerLayout />
+                  </div>
+
+                  <div className="border-t border-base-200 bg-base-100 px-4 py-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={toggleInCallMicrophone}
+                          className={`btn btn-sm gap-2 ${isInCallMicEnabled ? 'btn-primary' : 'btn-outline'}`}
+                        >
+                          {isInCallMicEnabled ? <MicIcon className="size-4" /> : <MicOffIcon className="size-4" />}
+                          {isInCallMicEnabled ? 'Mute' : 'Unmute'}
+                        </button>
+
+                        {callType === 'video' && (
+                          <button
+                            onClick={toggleInCallCamera}
+                            className={`btn btn-sm gap-2 ${isInCallCamEnabled ? 'btn-primary' : 'btn-outline'}`}
+                          >
+                            {isInCallCamEnabled ? <VideoIcon className="size-4" /> : <VideoOffIcon className="size-4" />}
+                            {isInCallCamEnabled ? 'Camera on' : 'Camera off'}
+                          </button>
+                        )}
+
+                        <button
+                          onClick={toggleRecording}
+                          className={`btn btn-sm gap-2 ${isRecording ? 'btn-error' : 'btn-outline'}`}
+                        >
+                          <RadioIcon className={`size-4 ${isRecording ? 'animate-pulse' : ''}`} />
+                          {isRecording ? 'Stop recording' : 'Record'}
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setIsSidebarOpen(true);
+                            setActivePanel('chat');
+                          }}
+                          className={`btn btn-sm gap-2 ${isSidebarOpen && activePanel === 'chat' ? 'btn-secondary' : 'btn-outline'}`}
+                        >
+                          <MessageSquareIcon className="size-4" /> Chat
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setIsSidebarOpen(true);
+                            setActivePanel('whiteboard');
+                          }}
+                          className={`btn btn-sm gap-2 ${isSidebarOpen && activePanel === 'whiteboard' ? 'btn-secondary' : 'btn-outline'}`}
+                        >
+                          <PenToolIcon className="size-4" /> Whiteboard
+                        </button>
+                      </div>
+
+                      <button onClick={leaveCurrentCall} className="btn btn-error btn-sm gap-2">
+                        <PhoneOffIcon className="size-4" /> End call
+                      </button>
+                    </div>
+                  </div>
                 </div>
+
+                {isSidebarOpen && (
+                  <aside className="flex h-full w-full max-w-[380px] flex-col border-l border-base-200 bg-base-100">
+                    <div className="flex items-center justify-between border-b border-base-200 px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setActivePanel('chat')}
+                          className={`btn btn-sm gap-2 ${activePanel === 'chat' ? 'btn-secondary' : 'btn-ghost'}`}
+                        >
+                          <MessageSquareIcon className="size-4" /> Chat
+                        </button>
+                        <button
+                          onClick={() => setActivePanel('whiteboard')}
+                          className={`btn btn-sm gap-2 ${activePanel === 'whiteboard' ? 'btn-secondary' : 'btn-ghost'}`}
+                        >
+                          <PenToolIcon className="size-4" /> Whiteboard
+                        </button>
+                      </div>
+                      <button onClick={() => setIsSidebarOpen(false)} className="btn btn-ghost btn-sm btn-circle">
+                        <XIcon className="size-4" />
+                      </button>
+                    </div>
+
+                    {activePanel === 'chat' ? (
+                      <div className="flex min-h-0 flex-1 flex-col">
+                        <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                          {chatMessages.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/50 p-6 text-center">
+                              <MessageSquareIcon className="mx-auto mb-3 size-8 text-base-content/25" />
+                              <p className="font-medium text-base-content/70">No messages yet</p>
+                              <p className="mt-1 text-sm text-base-content/50">Share links, notes, or quick decisions during the call.</p>
+                            </div>
+                          ) : (
+                            chatMessages.map((message) => {
+                              const isOwn = message.userId === user._id;
+                              return (
+                                <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                                  <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${isOwn ? 'bg-primary text-primary-content' : 'bg-base-200 text-base-content'}`}>
+                                    <p className={`text-[11px] font-semibold uppercase tracking-wide ${isOwn ? 'text-primary-content/70' : 'text-base-content/45'}`}>
+                                      {isOwn ? 'You' : message.userName}
+                                    </p>
+                                    <p className="mt-1 whitespace-pre-wrap break-words text-sm">{message.text}</p>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                          <div ref={messagesEndRef} />
+                        </div>
+
+                        <div className="border-t border-base-200 p-4">
+                          <div className="flex items-end gap-2">
+                            <textarea
+                              value={chatInput}
+                              onChange={(event) => setChatInput(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' && !event.shiftKey) {
+                                  event.preventDefault();
+                                  handleSendChatMessage();
+                                }
+                              }}
+                              className="textarea textarea-bordered min-h-[88px] flex-1 resize-none"
+                              placeholder="Type a message for everyone in the call…"
+                            />
+                            <button onClick={handleSendChatMessage} className="btn btn-primary btn-square">
+                              <SendIcon className="size-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex min-h-0 flex-1 flex-col">
+                        <div className="flex flex-wrap items-center gap-2 border-b border-base-200 px-4 py-3">
+                          {WHITEBOARD_COLORS.map((color) => (
+                            <button
+                              key={color}
+                              onClick={() => setBrushColor(color)}
+                              className={`h-8 w-8 rounded-full border-2 transition ${brushColor === color ? 'border-base-content scale-110' : 'border-base-200'}`}
+                              style={{ backgroundColor: color }}
+                              title={`Brush ${color}`}
+                            />
+                          ))}
+
+                          <select
+                            value={brushWidth}
+                            onChange={(event) => setBrushWidth(Number(event.target.value))}
+                            className="select select-bordered select-sm ml-auto w-28"
+                          >
+                            {[2, 3, 4, 6].map((width) => (
+                              <option key={width} value={width}>{width}px</option>
+                            ))}
+                          </select>
+
+                          <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm gap-2 text-error">
+                            <Trash2Icon className="size-4" /> Clear
+                          </button>
+                        </div>
+
+                        <div className="px-4 py-3 text-sm text-base-content/55">
+                          Sketch ideas live. Everyone in the meeting sees new strokes instantly.
+                        </div>
+
+                        <div className="min-h-0 flex-1 px-4 pb-4">
+                          <div
+                            ref={whiteboardRef}
+                            className="relative h-full min-h-[320px] rounded-2xl border border-base-300 bg-white shadow-inner touch-none"
+                            onPointerDown={startDrawing}
+                            onPointerMove={continueDrawing}
+                            onPointerUp={stopDrawing}
+                            onPointerLeave={stopDrawing}
+                          >
+                            <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none">
+                              {renderedStrokes.map((stroke) => (
+                                <path
+                                  key={stroke.id}
+                                  d={pointsToSvgPath(stroke.points)}
+                                  fill="none"
+                                  stroke={stroke.color}
+                                  strokeWidth={stroke.width}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              ))}
+                            </svg>
+                            {renderedStrokes.length === 0 && (
+                              <div className="absolute inset-0 flex items-center justify-center text-center text-base-content/35">
+                                <div>
+                                  <PenToolIcon className="mx-auto mb-3 size-8" />
+                                  <p className="font-medium">Start drawing on the board</p>
+                                  <p className="mt-1 text-sm">Use the color swatches above to annotate ideas together.</p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </aside>
+                )}
               </div>
             </StreamCall>
           </StreamVideo>
@@ -364,6 +824,10 @@ const VideoCallModal = ({ isOpen, onClose, callId, token, user, isInitiator, par
                   <div className="rounded-2xl bg-base-200 px-4 py-3">
                     <p className="text-xs uppercase tracking-wide text-base-content/50">Status</p>
                     <p className="mt-1 font-medium text-base-content">{isInitiator ? 'Starting a ringing call' : 'Joining an incoming call'}</p>
+                  </div>
+                  <div className="rounded-2xl bg-base-200 px-4 py-3">
+                    <p className="text-xs uppercase tracking-wide text-base-content/50">Meeting tools</p>
+                    <p className="mt-1 text-sm font-medium text-base-content">Live chat, whiteboard, recording, microphone control, camera control</p>
                   </div>
                   <div className="rounded-2xl bg-base-200 px-4 py-3 space-y-3">
                     <p className="text-xs uppercase tracking-wide text-base-content/50">Devices</p>
