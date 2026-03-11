@@ -464,13 +464,11 @@ const AdminPage = () => {
                             checked={isSelected}
                             onChange={() => toggleChannelMember(member._id)}
                           />
-                          <div className="avatar">
-                            <div className="w-8 rounded-full bg-base-200 overflow-hidden">
-                              {member.profilePic ? (
-                                <img src={member.profilePic} alt={member.fullName} />
-                              ) : null}
-                            </div>
-                          </div>
+                          <Avatar
+                            src={member.profilePic}
+                            name={member.fullName}
+                            size="w-8 h-8"
+                          />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium truncate">{member.fullName}</p>
                             <p className="text-xs text-base-content/50 capitalize">{member.role || "member"}</p>
@@ -556,11 +554,11 @@ const AdminPage = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
               {members.map((m) => (
                 <div key={m._id} className="flex items-center gap-3 p-3 bg-base-300 rounded-xl">
-                  <div className="avatar">
-                    <div className="w-9 rounded-full">
-                      <img src={m.profilePic} alt={m.fullName} onError={(e) => (e.target.style.display = "none")} />
-                    </div>
-                  </div>
+                  <Avatar
+                    src={m.profilePic}
+                    name={m.fullName}
+                    size="w-9 h-9"
+                  />
                   <div className="min-w-0">
                     <p className="font-semibold text-sm truncate">{m.fullName}</p>
                     <p className="text-xs text-base-content/50 capitalize truncate">{m.role || "member"}</p>

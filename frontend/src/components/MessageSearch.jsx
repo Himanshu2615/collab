@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { SearchIcon, XIcon, CalendarIcon, UserIcon } from "lucide-react";
+import Avatar from "./Avatar";
 
 const MessageSearch = ({ channel, onClose, onMessageSelect }) => {
   const [query, setQuery] = useState("");
@@ -135,11 +136,11 @@ const MessageSearch = ({ channel, onClose, onMessageSelect }) => {
                   onClick={() => handleMessageClick(result.message)}
                 >
                   <div className="flex items-start gap-3">
-                    <div className="avatar">
-                      <div className="w-10 rounded-full">
-                        <img src={result.message.user?.image} alt={result.message.user?.name} />
-                      </div>
-                    </div>
+                    <Avatar
+                      src={result.message.user?.image}
+                      name={result.message.user?.name}
+                      size="w-10 h-10"
+                    />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-semibold">{result.message.user?.name}</span>

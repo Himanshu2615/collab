@@ -1,5 +1,5 @@
 import React from "react";
-import { getAvatarColor, getInitials, isValidAvatarUrl } from "../lib/avatarUtils";
+import { getAvatarColor, getDisplayImageUrl, getInitials, isValidAvatarUrl } from "../lib/avatarUtils";
 
 /**
  * Unified Avatar — Google/Teams style: soft coloured background + accent initials.
@@ -14,6 +14,7 @@ import { getAvatarColor, getInitials, isValidAvatarUrl } from "../lib/avatarUtil
 const Avatar = ({ src, name, size = "w-10 h-10", rounded = "rounded-full", className = "", style = {} }) => {
     const { bg, text } = getAvatarColor(name);
     const initials = getInitials(name);
+    const displaySrc = getDisplayImageUrl(src);
 
     // Derive font-size from the first Tailwind width token so initials scale
     // correctly at any avatar size. Tailwind: 1 spacing unit = 4 px.
@@ -31,9 +32,9 @@ const Avatar = ({ src, name, size = "w-10 h-10", rounded = "rounded-full", class
             <span style={{ color: text, fontSize, lineHeight: 1, userSelect: "none" }}>
                 {initials}
             </span>
-            {isValidAvatarUrl(src) && (
+            {isValidAvatarUrl(displaySrc) && (
                 <img
-                    src={src}
+                    src={displaySrc}
                     alt={name}
                     className="absolute inset-0 w-full h-full object-cover"
                     referrerPolicy="no-referrer"

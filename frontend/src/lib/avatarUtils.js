@@ -17,6 +17,14 @@ const BLOCKED_AVATAR_HOSTS = new Set([
     "www.ui-avatars.com",
 ]);
 
+const CLOUDINARY_HOSTS = new Set([
+    "res.cloudinary.com",
+]);
+
+const IMAGE_PROXY_BASE = import.meta.env.MODE === "development"
+    ? "http://localhost:5000/api/files/image-proxy"
+    : "/api/files/image-proxy";
+
 /**
  * Returns true when the value is a displayable photo URL or data URI.
  * Rejects only empty / blank values.
@@ -30,6 +38,21 @@ export function isValidAvatarUrl(url) {
         return protocol === "http:" || protocol === "https:";
     } catch {
         return false;
+    }
+}
+
+export function getDisplayImageUrl(url) {
+    if (!isValidAvatarUrl(url) || url.startsWith("data:")) return url;
+
+    try {
+        const parsedUrl = new URL(url);
+        if (!CLOUDINARY_HOSTS.has(parsedUrl.hostname)) {
+            return url;
+        }
+
+        return `${IMAGE_PROXY_BASE}?url=${encodeURIComponent(parsedUrl.toString())}`;
+    } catch {
+        return url;
     }
 }
 

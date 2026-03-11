@@ -1,6 +1,31 @@
 import File from "../models/File.js";
 import cloudinary from "../lib/cloudinary.js";
 
+const ALLOWED_IMAGE_PROXY_HOSTS = new Set([
+    "res.cloudinary.com",
+]);
+
+const IMAGE_PROXY_TIMEOUT_MS = 10000;
+
+function getProxiedImageUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== "string") return null;
+
+    try {
+        const parsedUrl = new URL(rawUrl);
+        const isAllowedHost = ALLOWED_IMAGE_PROXY_HOSTS.has(parsedUrl.hostname);
+        const isSafeProtocol = parsedUrl.protocol === "https:";
+        const isImagePath = parsedUrl.pathname.includes("/image/") || parsedUrl.pathname.includes("/video/");
+
+        if (!isAllowedHost || !isSafeProtocol || !isImagePath) {
+            return null;
+        }
+
+        return parsedUrl;
+    } catch {
+        return null;
+    }
+}
+
 export const getFiles = async (req, res) => {
     try {
         const organizationId = req.user.organization;
@@ -17,6 +42,39 @@ export const getFiles = async (req, res) => {
     } catch (error) {
         console.error("Error in getFiles controller:", error);
         res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export const proxyImage = async (req, res) => {
+    try {
+        const parsedUrl = getProxiedImageUrl(req.query.url);
+
+        if (!parsedUrl) {
+            return res.status(400).json({ message: "Invalid image URL" });
+        }
+
+        const upstreamResponse = await fetch(parsedUrl, {
+            signal: AbortSignal.timeout(IMAGE_PROXY_TIMEOUT_MS),
+            headers: {
+                Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            },
+        });
+
+        if (!upstreamResponse.ok) {
+            return res.status(upstreamResponse.status).json({ message: "Unable to fetch image" });
+        }
+
+        const contentType = upstreamResponse.headers.get("content-type") || "application/octet-stream";
+        const cacheControl = upstreamResponse.headers.get("cache-control") || "public, max-age=3600";
+        const imageBuffer = Buffer.from(await upstreamResponse.arrayBuffer());
+
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", cacheControl);
+        res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+        return res.status(200).send(imageBuffer);
+    } catch (error) {
+        console.error("Error in proxyImage controller:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
     }
 };
 
