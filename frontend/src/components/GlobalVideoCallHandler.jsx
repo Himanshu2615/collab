@@ -53,9 +53,9 @@ const GlobalVideoCallHandler = () => {
 
     if (callerUserId && callerUserId === authUser._id) return null;
 
-    const conversationId = callerUserId
+    const conversationId = event.call?.custom?.conversationId || (callerUserId
       ? [authUser._id, callerUserId].sort().join('-')
-      : null;
+      : null);
 
     const participantIds = members.map((m) => m.user_id).filter(Boolean);
     const participantNames = members
@@ -242,8 +242,10 @@ const GlobalVideoCallHandler = () => {
     });
     setShowVideoCall(true);
 
-    // Navigate to the DM chat so the user is in context after the call
-    if (accepted.callerUserId) {
+    // Navigate to the correct chat so the user is in context after the call
+    if (accepted.conversationId && !accepted.conversationId.includes(authUser._id)) {
+      navigate(`/chat/${accepted.conversationId}`);
+    } else if (accepted.callerUserId) {
       navigate(`/chat/${accepted.callerUserId}`);
     }
   };

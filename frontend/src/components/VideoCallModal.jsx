@@ -21,7 +21,7 @@ import {
 import toast from 'react-hot-toast';
 import '@stream-io/video-react-sdk/dist/css/styles.css';
 import Avatar from './Avatar';
-import { saveCallLog, updateCallLog, upsertActiveCall } from '../lib/callHistory';
+import { removeActiveCall, saveCallLog, updateCallLog, upsertActiveCall } from '../lib/callHistory';
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 const CALL_CHAT_EVENT = 'bizzcolab.call.chat';
@@ -405,21 +405,34 @@ const VideoCallModal = ({
       customUnsubscribeRef.current = null;
       if (currentCall) {
         if (hasJoinedCallRef.current) {
-          updateCallLog(callId, {
-            status: 'left',
-            lastLeftAt: new Date().toISOString(),
-          });
-          upsertActiveCall({
-            callId,
-            conversationId,
-            type: callType,
-            participantIds: Array.from(new Set(participantIds)).filter(Boolean),
-            participantNames: Array.from(new Set(participantNames)).filter(Boolean),
-            participantProfiles,
-            status: 'ongoing',
-          });
+          const participants = currentCall.state?.participants || [];
+          // If we are the only participant (or there are 0 somehow), end the call entirely
+          if (participants.length <= 1) {
+            updateCallLog(callId, {
+              status: 'ended',
+              endTime: new Date().toISOString(),
+            });
+            removeActiveCall(callId);
+            currentCall.endCall().catch(() => {});
+          } else {
+            updateCallLog(callId, {
+              status: 'left',
+              lastLeftAt: new Date().toISOString(),
+            });
+            upsertActiveCall({
+              callId,
+              conversationId,
+              type: callType,
+              participantIds: Array.from(new Set(participantIds)).filter(Boolean),
+              participantNames: Array.from(new Set(participantNames)).filter(Boolean),
+              participantProfiles,
+              status: 'ongoing',
+            });
+            currentCall.leave().catch(() => {});
+          }
+        } else {
+          currentCall.leave().catch(() => {});
         }
-        currentCall.leave().catch(() => {});
       }
       callRef.current = null;
       hasJoinedCallRef.current = false;
@@ -582,6 +595,7 @@ const VideoCallModal = ({
           data: {
             members: uniqueParticipantIds.map((id) => ({ user_id: id })),
             ...(team ? { team } : {}),
+            custom: { conversationId },
           },
         });
       } else {
@@ -760,20 +774,31 @@ const VideoCallModal = ({
   const leaveCurrentCall = async () => {
     const activeCall = callRef.current || call;
     try {
-      updateCallLog(callId, {
-        status: 'left',
-        lastLeftAt: new Date().toISOString(),
-      });
-      upsertActiveCall({
-        callId,
-        conversationId,
-        type: callType,
-        participantIds: Array.from(new Set(participantIds)).filter(Boolean),
-        participantNames: Array.from(new Set(participantNames)).filter(Boolean),
-        participantProfiles: meetingRoster.filter((member) => !member.isYou),
-        status: 'ongoing',
-      });
-      await activeCall?.leave();
+      const participants = activeCall?.state?.participants || [];
+      // If we are the only participant left in the call (or 0 somehow)
+      if (participants.length <= 1) {
+        updateCallLog(callId, {
+          status: 'ended',
+          endTime: new Date().toISOString(),
+        });
+        removeActiveCall(callId);
+        await activeCall?.endCall();
+      } else {
+        updateCallLog(callId, {
+          status: 'left',
+          lastLeftAt: new Date().toISOString(),
+        });
+        upsertActiveCall({
+          callId,
+          conversationId,
+          type: callType,
+          participantIds: Array.from(new Set(participantIds)).filter(Boolean),
+          participantNames: Array.from(new Set(participantNames)).filter(Boolean),
+          participantProfiles: meetingRoster.filter((member) => !member.isYou),
+          status: 'ongoing',
+        });
+        await activeCall?.leave();
+      }
     } catch (_) {
       // noop
     }

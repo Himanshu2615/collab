@@ -37,6 +37,8 @@ const App = () => {
   const hasOrg = Boolean(authUser?.organization);
   const shouldEnableRealtime = isAuthenticated && isOnboarded && hasOrg;
 
+  console.log("App state:", { isLoading, authUser, isAuthenticated });
+
   if (isLoading) return <PageLoader />;
 
   // Shared props passed to every route guard
