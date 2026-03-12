@@ -12,6 +12,7 @@ import organizationRoutes from "./routes/organization.route.js";
 import fileRoutes from "./routes/file.route.js";
 import meetingRoutes from "./routes/meeting.route.js";
 import folderRoutes from "./routes/folder.route.js";
+import transcriptRoutes from "./routes/transcript.route.js";
 
 
 
@@ -42,6 +43,7 @@ app.use("/api/organizations", organizationRoutes);
 app.use("/api/files", fileRoutes);
 app.use("/api/folders", folderRoutes);
 app.use("/api/meetings", meetingRoutes);
+app.use("/api/transcripts", transcriptRoutes);
 
 
 

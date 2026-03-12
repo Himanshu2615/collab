@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'r
 import { OwnCapability, StreamVideoClient, StreamCall, StreamVideo, SpeakerLayout, useCallStateHooks, useToggleCallRecording } from '@stream-io/video-react-sdk';
 import {
   DownloadIcon,
+  FileTextIcon,
   InfoIcon,
   MessageSquareIcon,
   MonitorUpIcon,
@@ -21,6 +22,7 @@ import {
 import toast from 'react-hot-toast';
 import '@stream-io/video-react-sdk/dist/css/styles.css';
 import Avatar from './Avatar';
+import { saveTranscriptEntries } from '../lib/api';
 import { removeActiveCall, saveCallLog, updateCallLog, upsertActiveCall } from '../lib/callHistory';
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
@@ -32,6 +34,7 @@ const WHITEBOARD_COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f97316', '#ef4444'
 const WHITEBOARD_INITIAL_SIZE = { width: 3200, height: 2200 };
 const WHITEBOARD_EXPAND_STEP = 800;
 const WHITEBOARD_EDGE_PADDING = 180;
+const TRANSCRIPT_EVENT = 'bizzcolab.call.transcript';
 
 const createEventId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -247,6 +250,14 @@ const VideoCallModal = ({
   const personalDraftStrokeRef = useRef(null);
   const hasJoinedCallRef = useRef(false);
 
+  const [transcriptEntries, setTranscriptEntries] = useState([]);
+  const [transcriptDraft, setTranscriptDraft] = useState('');
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const recognitionRef = useRef(null);
+  const isTranscribingRef = useRef(false);
+  const pendingEntriesRef = useRef([]);
+  const transcriptEndRef = useRef(null);
+
   const updateDraftStroke = (updater) => {
     setDraftStroke((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -291,6 +302,13 @@ const VideoCallModal = ({
       setBrushWidth(3);
       setBoardSize(WHITEBOARD_INITIAL_SIZE);
       setPersonalBoardSize(WHITEBOARD_INITIAL_SIZE);
+      setTranscriptEntries([]);
+      setTranscriptDraft('');
+      setIsTranscribing(false);
+      isTranscribingRef.current = false;
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+      pendingEntriesRef.current = [];
     }
   }, [isOpen]);
 
@@ -436,6 +454,15 @@ const VideoCallModal = ({
       }
       callRef.current = null;
       hasJoinedCallRef.current = false;
+      // Stop transcription and flush pending entries
+      isTranscribingRef.current = false;
+      try { recognitionRef.current?.stop(); } catch (_) {}
+      recognitionRef.current = null;
+      const pendingEntries = [...pendingEntriesRef.current];
+      pendingEntriesRef.current = [];
+      if (pendingEntries.length > 0) {
+        saveTranscriptEntries(callId, pendingEntries).catch(() => {});
+      }
       setCall(null);
       setClient(null);
       setIsRecording(false);
@@ -458,6 +485,10 @@ const VideoCallModal = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [transcriptEntries]);
+
   const sendCustomCallEvent = async (payload) => {
     const activeCall = callRef.current || call;
     if (!activeCall) return;
@@ -479,6 +510,100 @@ const VideoCallModal = ({
     if (!stroke?.id || !stroke?.points?.length) return;
     ensureBoardSizeForPoints(stroke.points, 'personal');
     setPersonalWhiteboardStrokes((prev) => (prev.some((item) => item.id === stroke.id) ? prev : [...prev, stroke]));
+  };
+
+  const appendTranscriptEntry = (entry) => {
+    if (!entry?.id) return;
+    setTranscriptEntries((prev) => (prev.some((e) => e.id === entry.id) ? prev : [...prev, entry]));
+  };
+
+  const startTranscription = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR || recognitionRef.current) return;
+
+    isTranscribingRef.current = true;
+    setIsTranscribing(true);
+
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          const text = result[0].transcript.trim();
+          if (!text) continue;
+          const entry = {
+            id: createEventId(),
+            speakerId: user._id,
+            speakerName: user.fullName,
+            text,
+            timestamp: new Date().toISOString(),
+          };
+          appendTranscriptEntry(entry);
+          pendingEntriesRef.current.push(entry);
+          sendCustomCallEvent({ type: TRANSCRIPT_EVENT, entry }).catch(() => {});
+          setTranscriptDraft('');
+        } else {
+          setTranscriptDraft(result[0].transcript);
+        }
+      }
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error !== 'no-speech' && event.error !== 'aborted') {
+        console.error('Speech recognition error:', event.error);
+      }
+    };
+
+    recognition.onend = () => {
+      if (isTranscribingRef.current) {
+        try { recognition.start(); } catch (_) {}
+      }
+    };
+
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch (error) {
+      console.error('Failed to start speech recognition:', error);
+      isTranscribingRef.current = false;
+      setIsTranscribing(false);
+    }
+  };
+
+  const stopTranscription = () => {
+    isTranscribingRef.current = false;
+    setIsTranscribing(false);
+    setTranscriptDraft('');
+    try { recognitionRef.current?.stop(); } catch (_) {}
+    recognitionRef.current = null;
+  };
+
+  const flushTranscriptToBackend = () => {
+    const entries = [...pendingEntriesRef.current];
+    pendingEntriesRef.current = [];
+    if (entries.length > 0) {
+      saveTranscriptEntries(callId, entries).catch(() => {});
+    }
+  };
+
+  const downloadTranscript = () => {
+    if (!transcriptEntries.length) return;
+    const lines = transcriptEntries.map((entry) => {
+      const time = new Date(entry.timestamp).toLocaleTimeString();
+      const speaker = entry.speakerId === user._id ? 'You' : entry.speakerName;
+      return `[${time}] ${speaker}: ${entry.text}`;
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `transcript-${callId}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const ensureBoardSizeForPoints = (points = [], scope = 'shared') => {
@@ -558,6 +683,12 @@ const VideoCallModal = ({
         } else {
           setActiveStageTab((current) => (current === 'whiteboard' ? 'meeting' : current));
         }
+      }
+
+      if (custom.type === TRANSCRIPT_EVENT) {
+        const entry = custom.entry;
+        if (!entry?.id || entry.speakerId === user?._id) return;
+        appendTranscriptEntry(entry);
       }
     });
   };
@@ -658,6 +789,7 @@ const VideoCallModal = ({
       hasJoinedCallRef.current = true;
 
       toast.success('Connected to call');
+      startTranscription();
     };
 
     try {
@@ -802,6 +934,8 @@ const VideoCallModal = ({
     } catch (_) {
       // noop
     }
+    stopTranscription();
+    flushTranscriptToBackend();
     hasJoinedCallRef.current = false;
     onClose?.();
   };
@@ -1380,6 +1514,18 @@ const VideoCallModal = ({
                           <UsersIcon className="size-4" /> Participants
                         </button>
 
+                        <button
+                          onClick={() => {
+                            setIsSidebarOpen(true);
+                            setActiveSidebarTab('transcript');
+                          }}
+                          className={`btn btn-sm gap-2 ${isSidebarOpen && activeSidebarTab === 'transcript' ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
+                        >
+                          <FileTextIcon className="size-4" />
+                          {isTranscribing && <span className="inline-flex size-1.5 rounded-full bg-success animate-pulse" />}
+                          Transcript
+                        </button>
+
                         <InCallScreenShareButton />
 
                         <InCallInviteBackButton members={meetingRoster} onInvite={handleInviteMembersAgain} />
@@ -1433,6 +1579,15 @@ const VideoCallModal = ({
                           >
                             Participants ({meetingRoster.length})
                           </button>
+                          <button
+                            onClick={() => setActiveSidebarTab('transcript')}
+                            className={`tab tab-sm ${activeSidebarTab === 'transcript' ? 'tab-active' : ''}`}
+                          >
+                            <span className="flex items-center gap-1">
+                              {isTranscribing && <span className="inline-flex size-1.5 rounded-full bg-success animate-pulse" />}
+                              Transcript
+                            </span>
+                          </button>
                       </div>
                       <button onClick={() => setIsSidebarOpen(false)} className="btn btn-ghost btn-sm btn-circle self-start">
                         <XIcon className="size-4" />
@@ -1485,6 +1640,69 @@ const VideoCallModal = ({
                                   <SendIcon className="size-4" />
                                 </button>
                               </div>
+                            </div>
+                          </>
+                        ) : activeSidebarTab === 'transcript' ? (
+                          <>
+                            <div className="flex items-center justify-between border-b border-base-200 px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex size-2 rounded-full ${isTranscribing ? 'bg-success animate-pulse' : 'bg-base-300'}`} />
+                                <span className="text-sm font-medium text-base-content/70">
+                                  {isTranscribing ? 'Live transcription on' : 'Transcription paused'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={isTranscribing ? stopTranscription : startTranscription}
+                                  className={`btn btn-xs ${isTranscribing ? 'btn-error' : 'btn-primary'}`}
+                                >
+                                  {isTranscribing ? 'Pause' : 'Resume'}
+                                </button>
+                                {transcriptEntries.length > 0 && (
+                                  <button onClick={downloadTranscript} className="btn btn-xs btn-ghost gap-1" title="Download transcript as text">
+                                    <DownloadIcon className="size-3" /> Save
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="max-h-[28vh] flex-1 space-y-4 overflow-y-auto px-4 py-4 xl:max-h-none">
+                              {transcriptEntries.length === 0 && !transcriptDraft ? (
+                                <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/50 p-6 text-center">
+                                  <FileTextIcon className="mx-auto mb-3 size-8 text-base-content/25" />
+                                  <p className="font-medium text-base-content/70">No transcript yet</p>
+                                  <p className="mt-1 text-sm text-base-content/50">
+                                    {(window.SpeechRecognition || window.webkitSpeechRecognition)
+                                      ? 'Start speaking — words appear here in real time for all participants.'
+                                      : 'Live transcription requires Chrome or Edge browser.'}
+                                  </p>
+                                </div>
+                              ) : (
+                                <>
+                                  {transcriptEntries.map((entry) => (
+                                    <div key={entry.id} className="space-y-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-semibold text-primary">
+                                          {entry.speakerId === user._id ? 'You' : entry.speakerName}
+                                        </span>
+                                        <span className="text-[10px] text-base-content/40">
+                                          {new Date(entry.timestamp).toLocaleTimeString()}
+                                        </span>
+                                      </div>
+                                      <p className="text-sm leading-relaxed text-base-content/80">{entry.text}</p>
+                                    </div>
+                                  ))}
+                                  {transcriptDraft && (
+                                    <div className="space-y-1 opacity-55">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-semibold text-primary">You</span>
+                                        <span className="text-[10px] italic text-base-content/40">speaking…</span>
+                                      </div>
+                                      <p className="text-sm italic leading-relaxed text-base-content/60">{transcriptDraft}</p>
+                                    </div>
+                                  )}
+                                  <div ref={transcriptEndRef} />
+                                </>
+                              )}
                             </div>
                           </>
                         ) : (
@@ -1688,7 +1906,7 @@ const VideoCallModal = ({
                   </div>
                   <div className="rounded-2xl bg-base-200 px-4 py-3">
                     <p className="text-xs uppercase tracking-wide text-base-content/50">Meeting tools</p>
-                    <p className="mt-1 text-sm font-medium text-base-content">Live chat, whiteboard on demand, screen sharing, synced recording controls, microphone control, camera control</p>
+                    <p className="mt-1 text-sm font-medium text-base-content">Live chat, live transcription, whiteboard on demand, screen sharing, synced recording controls, microphone control, camera control</p>
                   </div>
                   <div className="rounded-2xl bg-base-200 px-4 py-3 space-y-3">
                     <p className="text-xs uppercase tracking-wide text-base-content/50">Devices</p>

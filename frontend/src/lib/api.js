@@ -118,6 +118,17 @@ export async function getDashboardSummary() {
   }
 }
 
+/* ── TRANSCRIPTS ── */
+export const saveTranscriptEntries = async (callId, entries) => {
+  const res = await axiosInstance.post(`/transcripts/${callId}/entries`, { entries });
+  return res.data;
+};
+
+export const getTranscript = async (callId) => {
+  const res = await axiosInstance.get(`/transcripts/${callId}`);
+  return res.data;
+};
+
 export async function getRecommendedUsers() {
   const response = await axiosInstance.get("/users");
   return response.data;
