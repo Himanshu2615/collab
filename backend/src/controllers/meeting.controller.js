@@ -1,4 +1,5 @@
 import Meeting from "../models/Meeting.js";
+import { scheduleMeetingEmail, cancelMeetingEmail } from "../lib/scheduler.js";
 
 export const getMeetings = async (req, res) => {
     try {
@@ -69,10 +70,18 @@ export const createMeeting = async (req, res) => {
             participants: participants || [req.user._id],
             channel,
             organization: organizationId,
-            // meetingLink could be generated here if using Stream Video
+            // Automatically assign the meeting link based on frontend URL and new meeting ID
         });
-
+        
+        // Save first so we have the ID to construct the link and schedule it
         await newMeeting.save();
+        
+        newMeeting.meetingLink = `${process.env.FRONTEND_URL}/call/${newMeeting._id}`;
+        await newMeeting.save();
+
+        // Schedule the meeting email notification to trigger at kickoff
+        await scheduleMeetingEmail(newMeeting, req.user._id);
+
         res.status(201).json(newMeeting);
     } catch (error) {
         console.error("Error in createMeeting controller:", error);
@@ -94,6 +103,10 @@ export const deleteMeeting = async (req, res) => {
         }
 
         await Meeting.findByIdAndDelete(id);
+        
+        // Cancel scheduled email if one exists
+        cancelMeetingEmail(id);
+
         res.status(200).json({ message: "Meeting deleted" });
     } catch (error) {
         console.error("Error in deleteMeeting controller:", error);

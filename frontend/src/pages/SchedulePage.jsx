@@ -431,7 +431,7 @@ const SchedulePage = () => {
   const { mutate: schedule, isPending: isCreating } = useMutation({
     mutationFn: createMeeting,
     onSuccess: () => {
-      toast.success("Meeting scheduled!");
+      toast.success("Meeting scheduled! Emails will be sent at the scheduled time.");
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
     },
     onError: (err) => toast.error(err.response?.data?.message || "Failed to schedule"),

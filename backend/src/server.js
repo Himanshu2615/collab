@@ -17,6 +17,7 @@ import transcriptRoutes from "./routes/transcript.route.js";
 
 
 import { connectDB } from "./lib/db.js";
+import { initScheduler } from "./lib/scheduler.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -56,7 +57,8 @@ if (process.env.NODE_ENV === "production") {
 }
 
 // Connect to MongoDB BEFORE accepting requests
-connectDB().then(() => {
+connectDB().then(async () => {
+  await initScheduler();
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });

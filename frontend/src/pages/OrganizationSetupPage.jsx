@@ -23,8 +23,9 @@ const OrganizationSetupPage = () => {
     const { mutate: create, isPending: creating } = useMutation({
         mutationFn: createOrganization,
         onSuccess: () => {
-            toast.success("Organization created! Welcome aboard 🎉");
+            toast.success("Organization created! Welcome aboard \uD83C\uDF89");
             queryClient.invalidateQueries({ queryKey: ["myOrganization"] });
+            queryClient.invalidateQueries({ queryKey: ["authUser"] });
         },
         onError: (err) => toast.error(err.response?.data?.message || "Failed to create organization"),
     });
@@ -32,8 +33,9 @@ const OrganizationSetupPage = () => {
     const { mutate: join, isPending: joining } = useMutation({
         mutationFn: joinOrganization,
         onSuccess: () => {
-            toast.success("Joined organization! Welcome 🎉");
+            toast.success("Joined organization! Welcome \uD83C\uDF89");
             queryClient.invalidateQueries({ queryKey: ["myOrganization"] });
+            queryClient.invalidateQueries({ queryKey: ["authUser"] });
         },
         onError: (err) => toast.error(err.response?.data?.message || "Invalid invite code"),
     });

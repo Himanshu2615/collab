@@ -23,6 +23,8 @@
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.2",
+    "node-schedule": "^2.1.1",
+    "nodemailer": "^8.0.2",
     "stream-chat": "^8.60.0"
   },
   "devDependencies": {
