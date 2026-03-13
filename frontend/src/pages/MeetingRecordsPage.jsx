@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
 import { getCallLogs, subscribeToCallStore } from "../lib/callHistory";
-import { getTranscript } from "../lib/api";
+import { getTranscript, getTranscriptSummary } from "../lib/api";
 import useAuthUser from "../hooks/useAuthUser";
-import { CalendarDays, Clock, Download, FileText, Users, Video, Phone, History } from "lucide-react";
+import { CalendarDays, Clock, Download, FileText, Users, Video, Phone, History, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
 import toast from "react-hot-toast";
 import Avatar from "../components/Avatar";
 
@@ -43,6 +43,9 @@ const MeetingRecordsPage = () => {
   const { authUser } = useAuthUser();
   const [callLogs, setCallLogs] = useState([]);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [expandedSummaryId, setExpandedSummaryId] = useState(null);
+  const [summaries, setSummaries] = useState({});
+  const [isSummarizing, setIsSummarizing] = useState({});
 
   useEffect(() => {
     const refresh = () => setCallLogs(getCallLogs());
@@ -93,6 +96,40 @@ const MeetingRecordsPage = () => {
     }
   };
 
+  const handleToggleSummary = async (log) => {
+    if (expandedSummaryId === log.callId) {
+      setExpandedSummaryId(null);
+      return;
+    }
+
+    setExpandedSummaryId(log.callId);
+
+    // If we already have it, no need to fetch
+    if (summaries[log.callId]) return;
+
+    try {
+      setIsSummarizing(prev => ({ ...prev, [log.callId]: true }));
+      const response = await getTranscriptSummary(log.callId);
+      
+      if (response && response.summary) {
+        setSummaries(prev => ({ ...prev, [log.callId]: response.summary }));
+      } else {
+        toast.error("Summary could not be generated.");
+        setExpandedSummaryId(null);
+      }
+    } catch (error) {
+      console.error("Error fetching summary:", error);
+      if (error?.response?.status === 404) {
+        toast.error("No transcript available to summarize.");
+      } else {
+        toast.error("Failed to generate summary.");
+      }
+      setExpandedSummaryId(null);
+    } finally {
+      setIsSummarizing(prev => ({ ...prev, [log.callId]: false }));
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto p-6 lg:p-10 w-full h-full overflow-y-auto">
       <div className="flex items-center gap-3 mb-8">
@@ -123,71 +160,106 @@ const MeetingRecordsPage = () => {
             const profiles = log.participantProfiles || [];
             
             return (
-              <div key={log.callId} className="bg-base-100 border border-base-300 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col sm:flex-row sm:items-center gap-5">
-                
-                {/* Date/Time Block */}
-                <div className="flex flex-row sm:flex-col items-center sm:items-start gap-3 sm:gap-1 min-w-[120px] shrink-0">
-                  <div className="text-sm font-bold text-base-content/80 bg-base-200 px-3 py-1 rounded-lg">
-                    {date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+              <div key={log.callId} className="flex flex-col gap-2">
+                {/* Main Card */}
+                <div className="bg-base-100 border border-base-300 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col sm:flex-row sm:items-center gap-5">
+                  {/* Date/Time Block */}
+                  <div className="flex flex-row sm:flex-col items-center sm:items-start gap-3 sm:gap-1 min-w-[120px] shrink-0">
+                    <div className="text-sm font-bold text-base-content/80 bg-base-200 px-3 py-1 rounded-lg">
+                      {date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-base-content/60 text-sm font-medium mt-1 sm:px-1">
+                      <Clock className="size-3.5" />
+                      <span>{date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 text-base-content/60 text-sm font-medium mt-1 sm:px-1">
-                    <Clock className="size-3.5" />
-                    <span>{date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                </div>
 
-                {/* Details */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2">
-                    {log.type === 'video' ? <Video className="size-4 text-primary" /> : <Phone className="size-4 text-success" />}
-                    <h3 className="text-lg font-bold text-base-content truncate">
-                      {log.participants?.length > 0 ? log.participants.join(", ") : "Call"}
-                    </h3>
-                  </div>
-                  
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-base-content/70">
-                    <div className="flex items-center gap-1.5 bg-base-200/50 px-2 py-0.5 rounded-md">
-                      <CalendarDays className="size-3.5 opacity-60" />
-                      <span>{formatDuration(log.startTime, log.endTime)}</span>
+                  {/* Details */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2">
+                      {log.type === 'video' ? <Video className="size-4 text-primary" /> : <Phone className="size-4 text-success" />}
+                      <h3 className="text-lg font-bold text-base-content truncate">
+                        {log.participants?.length > 0 ? log.participants.join(", ") : "Call"}
+                      </h3>
                     </div>
                     
-                    {hostProfile && hostProfile.name !== "Unknown participant" && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-base-content/40">Host:</span>
-                        <div className="flex items-center gap-1.5">
-                          <Avatar src={hostProfile?.image} name={hostProfile?.name} size="w-5 h-5" rounded="rounded-md" />
-                          <span className="font-medium truncate max-w-[100px]">{hostProfile?.name}</span>
-                        </div>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-base-content/70">
+                      <div className="flex items-center gap-1.5 bg-base-200/50 px-2 py-0.5 rounded-md">
+                        <CalendarDays className="size-3.5 opacity-60" />
+                        <span>{formatDuration(log.startTime, log.endTime)}</span>
                       </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Actions / Participants */}
-                <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-4 shrink-0 border-t sm:border-t-0 sm:border-l border-base-300 pt-4 sm:pt-0 sm:pl-5">
-                  {profiles.length > 0 && (
-                    <div className="flex -space-x-1.5" title={`${profiles.length} participants`}>
-                      {profiles.slice(0, 4).map((p) => (
-                        <Avatar key={p.id} src={p.image} name={p.name} size="w-7 h-7" className="border-2 border-base-100 shadow-sm" />
-                      ))}
-                      {profiles.length > 4 && (
-                        <div className="w-7 h-7 rounded-full bg-base-200 border-2 border-base-100 flex items-center justify-center text-[10px] font-bold text-base-content/70 z-10">
-                          +{profiles.length - 4}
+                      
+                      {hostProfile && hostProfile.name !== "Unknown participant" && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-base-content/40">Host:</span>
+                          <div className="flex items-center gap-1.5">
+                            <Avatar src={hostProfile?.image} name={hostProfile?.name} size="w-5 h-5" rounded="rounded-md" />
+                            <span className="font-medium truncate max-w-[100px]">{hostProfile?.name}</span>
+                          </div>
                         </div>
                       )}
                     </div>
-                  )}
-                  
-                  <button 
-                    onClick={() => handleDownloadTranscript(log)}
-                    disabled={isDownloading || !log.endTime}
-                    className="btn btn-sm btn-outline border-base-300 hover:bg-primary/10 hover:text-primary hover:border-primary/30"
-                  >
-                    <Download className="size-3.5" />
-                    Transcript
-                  </button>
+                  </div>
+
+                  {/* Actions / Participants */}
+                  <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 shrink-0 border-t sm:border-t-0 sm:border-l border-base-300 pt-4 sm:pt-0 sm:pl-5">
+                    {profiles.length > 0 && (
+                      <div className="flex -space-x-1.5 mb-2" title={`${profiles.length} participants`}>
+                        {profiles.slice(0, 4).map((p) => (
+                          <Avatar key={p.id} src={p.image} name={p.name} size="w-7 h-7" className="border-2 border-base-100 shadow-sm" />
+                        ))}
+                        {profiles.length > 4 && (
+                          <div className="w-7 h-7 rounded-full bg-base-200 border-2 border-base-100 flex items-center justify-center text-[10px] font-bold text-base-content/70 z-10">
+                            +{profiles.length - 4}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <button 
+                        onClick={() => handleToggleSummary(log)}
+                        disabled={!log.endTime || isSummarizing[log.callId]}
+                        className={`btn btn-sm flex-1 sm:flex-none btn-outline ${expandedSummaryId === log.callId ? 'bg-primary/10 text-primary border-primary/30' : 'border-base-300 hover:bg-primary/10 hover:text-primary hover:border-primary/30'}`}
+                      >
+                        {isSummarizing[log.callId] ? (
+                          <span className="loading loading-spinner w-3.5 h-3.5" />
+                        ) : (
+                          <Sparkles className="size-3.5" />
+                        )}
+                        Summary
+                        {expandedSummaryId === log.callId ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                      </button>
+                      <button 
+                        onClick={() => handleDownloadTranscript(log)}
+                        disabled={isDownloading || !log.endTime}
+                        className="btn btn-sm flex-1 sm:flex-none btn-outline border-base-300 hover:bg-primary/10 hover:text-primary hover:border-primary/30"
+                      >
+                        <Download className="size-3.5" />
+                        Transcript
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 
+                {/* Summary Expandable Panel */}
+                {expandedSummaryId === log.callId && (
+                  <div className="mt-2 p-5 bg-gradient-to-br from-primary/5 to-transparent border border-primary/20 rounded-2xl text-base-content/80 text-sm leading-relaxed prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1">
+                    <div className="flex items-center gap-2 mb-3 text-primary font-bold">
+                      <Sparkles className="size-4" />
+                      <h4>AI Meeting Summary</h4>
+                    </div>
+                    {isSummarizing[log.callId] ? (
+                      <div className="animate-pulse flex flex-col gap-2">
+                        <div className="h-4 bg-primary/10 rounded w-3/4"></div>
+                        <div className="h-4 bg-primary/10 rounded w-1/2"></div>
+                        <div className="h-4 bg-primary/10 rounded w-5/6"></div>
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap">{summaries[log.callId]}</div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

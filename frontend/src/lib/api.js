@@ -129,6 +129,11 @@ export const getTranscript = async (callId) => {
   return res.data;
 };
 
+export const getTranscriptSummary = async (callId) => {
+  const res = await axiosInstance.get(`/transcripts/${callId}/summary`);
+  return res.data;
+};
+
 export async function getRecommendedUsers() {
   const response = await axiosInstance.get("/users");
   return response.data;

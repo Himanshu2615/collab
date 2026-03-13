@@ -1,5 +1,7 @@
 import Transcript from "../models/Transcript.js";
 import cloudinary from "../lib/cloudinary.js";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import axios from "axios";
 
 /**
  * POST /api/transcripts/:callId/entries
@@ -131,5 +133,80 @@ export const getTranscript = async (req, res) => {
   } catch (error) {
     console.error("Error fetching transcript:", error);
     res.status(500).json({ message: "Failed to fetch transcript" });
+  }
+};
+
+/**
+ * GET /api/transcripts/:callId/summary
+ * Generates an AI summary of the transcript and caches it.
+ */
+export const getTranscriptSummary = async (req, res) => {
+  try {
+    const { callId } = req.params;
+
+    if (!callId || typeof callId !== "string" || callId.length > 200) {
+      return res.status(400).json({ message: "Invalid callId" });
+    }
+
+    const transcript = await Transcript.findOne({ callId });
+
+    if (!transcript) {
+      return res.status(404).json({ message: "Transcript not found" });
+    }
+
+    // Return cached summary if available
+    if (transcript.summary) {
+      return res.json({ summary: transcript.summary });
+    }
+
+    // Check if we have the transcript text
+    let transcriptText = "";
+
+    // Prefer Cloudinary URL if available
+    if (transcript.cloudinaryUrl) {
+      try {
+        // Fetch raw text from Cloudinary
+        const rawUrl = transcript.cloudinaryUrl.replace('/upload/fl_attachment/', '/upload/');
+        const response = await axios.get(rawUrl);
+        transcriptText = response.data;
+      } catch (err) {
+        console.error("Error fetching transcript from Cloudinary for summary:", err);
+        // Fallback to entries if available
+        if (transcript.entries && transcript.entries.length > 0) {
+          transcript.entries.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          transcriptText = transcript.entries.map(e => `${e.speakerName}: ${e.text}`).join("\n");
+        } else {
+          return res.status(500).json({ message: "Failed to fetch transcript content" });
+        }
+      }
+    } else if (transcript.entries && transcript.entries.length > 0) {
+      // Use entries directly
+      transcript.entries.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      transcriptText = transcript.entries.map(e => `${e.speakerName}: ${e.text}`).join("\n");
+    } else {
+      return res.status(404).json({ message: "No transcript content available to summarize" });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ message: "AI Summary is not configured (missing API key)" });
+    }
+
+    // Generate summary using Gemini 3.1 Flash Lite
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
+
+    const prompt = `You are an AI meeting assistant. Please read the following meeting transcript and provide a concise, readable summary. Include bullet points for key topics discussed, decisions made, and action items if any.\n\nTranscript:\n${transcriptText}`;
+
+    const result = await model.generateContent(prompt);
+    const summaryText = result.response.text();
+
+    // Cache the summary in the database
+    transcript.summary = summaryText;
+    await transcript.save();
+
+    res.json({ summary: summaryText });
+  } catch (error) {
+    console.error("Error generating summary:", error);
+    res.status(500).json({ message: "Failed to generate meeting summary" });
   }
 };
