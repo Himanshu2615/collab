@@ -16,6 +16,7 @@ const FilesPage             = lazy(() => import("./pages/FilesPage.jsx"));
 const SchedulePage          = lazy(() => import("./pages/SchedulePage.jsx"));
 const AdminPage             = lazy(() => import("./pages/AdminPage.jsx"));
 const ProfilePage           = lazy(() => import("./pages/ProfilePage.jsx"));
+const MeetingRecordsPage    = lazy(() => import("./pages/MeetingRecordsPage.jsx"));
 
 // Heavy Stream Video SDK — only loaded when a user is authenticated
 const GlobalVideoCallHandler = lazy(() => import("./components/GlobalVideoCallHandler.jsx"));
@@ -96,6 +97,7 @@ const App = () => {
       <Route path="/schedule"      element={<ProtectedRoute {...guardProps}><SchedulePage /></ProtectedRoute>} />
       <Route path="/admin"         element={<ProtectedRoute {...guardProps}><AdminPage /></ProtectedRoute>} />
       <Route path="/profile"       element={<ProtectedRoute {...guardProps}><ProfilePage /></ProtectedRoute>} />
+      <Route path="/records"       element={<ProtectedRoute {...guardProps}><MeetingRecordsPage /></ProtectedRoute>} />
       <Route path="/chat/:id"      element={<ProtectedRoute {...guardProps}><FullScreenChatPage /></ProtectedRoute>} />
       <Route path="/call/:id"      element={<ProtectedRoute {...guardProps} withSidebar={false}><CallPage /></ProtectedRoute>} />
       </Routes>

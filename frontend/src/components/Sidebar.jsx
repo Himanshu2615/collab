@@ -465,6 +465,7 @@ const Sidebar = () => {
         <AppItem to="/files" icon={FileTextIcon} label="Files" currentPath={pathname} />
         <AppItem to="/friends" icon={UsersIcon} label="Team & Friends" currentPath={pathname} />
         <AppItem to="/schedule" icon={VideoIcon} label="Meetings" currentPath={pathname} />
+        <AppItem to="/records" icon={FileTextIcon} label="Meeting Records" currentPath={pathname} />
         {isAdmin && (
           <AppItem to="/admin" icon={SettingsIcon} label="Settings" currentPath={pathname} />
         )}

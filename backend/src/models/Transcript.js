@@ -13,6 +13,7 @@ const transcriptSchema = new mongoose.Schema(
     callId: { type: String, required: true, unique: true, index: true },
     participants: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     entries: [transcriptEntrySchema],
+    cloudinaryUrl: { type: String },
   },
   { timestamps: true }
 );

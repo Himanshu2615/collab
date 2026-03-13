@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getMeetings, createMeeting, deleteMeeting, getMyOrganization, getOrgMembers } from "../lib/api";
 import {
@@ -106,6 +107,7 @@ const layoutBlocks = (meetings) => {
 ═══════════════════════════════════════════════════════════ */
 const EventPopover = ({ meeting, anchorRect, isAdmin, onDelete, onClose }) => {
   const ref    = useRef(null);
+  const navigate = useNavigate();
   const p      = palette(meeting._id);
   const start  = new Date(meeting.startTime);
   const end    = new Date(start.getTime() + meeting.duration * 60_000);
@@ -130,6 +132,21 @@ const EventPopover = ({ meeting, anchorRect, isAdmin, onDelete, onClose }) => {
     if (top  < 12) top  = 12;
     return { top, left, width: W };
   }, [anchorRect]);
+
+  const handleJoin = () => {
+    onClose();
+    // Use the meeting ID as the call ID.
+    // CallPage expects an ID in the URL.
+    navigate(`/call/${meeting._id}`, {
+      state: {
+        isInitiator: true, // or check if host
+        participantIds: meeting.participants?.map(p => p._id) || [],
+        participantNames: meeting.participants?.map(p => p.fullName) || [],
+        participantProfiles: meeting.participants?.map(p => ({ id: p._id, name: p.fullName, image: p.profilePic })) || [],
+        callType: "video",
+      }
+    });
+  };
 
   return (
     <div
@@ -176,6 +193,7 @@ const EventPopover = ({ meeting, anchorRect, isAdmin, onDelete, onClose }) => {
         </div>
         <div className="flex gap-2 mt-4 pt-3 border-t border-gray-100">
           <button
+            onClick={handleJoin}
             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition"
           >
             <Video className="size-3.5" /> Join

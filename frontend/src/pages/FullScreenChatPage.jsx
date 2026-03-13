@@ -265,6 +265,7 @@ const FullScreenChatPage = () => {
     image: member.user_id === authUser._id
       ? authUser.profilePic
       : (getUserImage(member.user_id) || member.user?.image || member.user?.profilePic || ""),
+    isYou: member.user_id === authUser._id,
   }));
   const dmPartnerMember = !isChannel
     ? memberList.find((m) => m.user_id !== authUser._id)

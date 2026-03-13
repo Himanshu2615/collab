@@ -59,12 +59,14 @@ const GlobalVideoCallHandler = () => {
 
     const participantIds = members.map((m) => m.user_id).filter(Boolean);
     const participantNames = members
+      .filter((m) => m.user_id !== authUser._id)
       .map((m) => m.user?.name || m.user_id)
-      .filter((name) => name && name !== authUser.fullName);
+      .filter(Boolean);
     const participantProfiles = members.map((member) => ({
       id: member.user_id,
       name: member.user?.name || member.user_id,
       image: member.user?.image || member.user?.profilePic || '',
+      isYou: member.user_id === authUser._id,
     }));
 
     return {
@@ -239,6 +241,7 @@ const GlobalVideoCallHandler = () => {
         : [accepted.callerName],
       participantProfiles: accepted.participantProfiles || [],
       callType: accepted.type || 'video',
+      callerUserId: accepted.callerUserId,
     });
     setShowVideoCall(true);
 
@@ -314,6 +317,7 @@ const GlobalVideoCallHandler = () => {
           participantProfiles={callInfo.participantProfiles}
           callType={callInfo.callType}
           conversationId={callInfo.conversationId}
+          callerUserId={callInfo.callerUserId}
         />
       )}
     </>

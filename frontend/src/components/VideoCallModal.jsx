@@ -202,6 +202,7 @@ const VideoCallModal = ({
   participantProfiles = [],
   callType = 'video',
   conversationId = '',
+  callerUserId = null,
 }) => {
   const [client, setClient] = useState(null);
   const [call, setCall] = useState(null);
@@ -253,9 +254,11 @@ const VideoCallModal = ({
   const [transcriptEntries, setTranscriptEntries] = useState([]);
   const [transcriptDraft, setTranscriptDraft] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isDownloadingTranscript, setIsDownloadingTranscript] = useState(false);
   const recognitionRef = useRef(null);
   const isTranscribingRef = useRef(false);
   const pendingEntriesRef = useRef([]);
+  const micEnabledRef = useRef(true);
   const transcriptEndRef = useRef(null);
 
   const updateDraftStroke = (updater) => {
@@ -436,16 +439,9 @@ const VideoCallModal = ({
             updateCallLog(callId, {
               status: 'left',
               lastLeftAt: new Date().toISOString(),
+              endTime: new Date().toISOString(),
             });
-            upsertActiveCall({
-              callId,
-              conversationId,
-              type: callType,
-              participantIds: Array.from(new Set(participantIds)).filter(Boolean),
-              participantNames: Array.from(new Set(participantNames)).filter(Boolean),
-              participantProfiles,
-              status: 'ongoing',
-            });
+            removeActiveCall(callId);
             currentCall.leave().catch(() => {});
           }
         } else {
@@ -513,8 +509,10 @@ const VideoCallModal = ({
   };
 
   const appendTranscriptEntry = (entry) => {
-    if (!entry?.id) return;
-    setTranscriptEntries((prev) => (prev.some((e) => e.id === entry.id) ? prev : [...prev, entry]));
+    // accept id or entryId for backward compatibility during live call
+    const keyId = entry?.entryId || entry?.id;
+    if (!keyId) return;
+    setTranscriptEntries((prev) => (prev.some((e) => (e.entryId || e.id) === keyId) ? prev : [...prev, entry]));
   };
 
   const startTranscription = () => {
@@ -530,13 +528,15 @@ const VideoCallModal = ({
     recognition.lang = 'en-US';
 
     recognition.onresult = (event) => {
+      // Silently discard ALL results while the mic is muted (privacy guard)
+      if (!micEnabledRef.current) return;
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
           const text = result[0].transcript.trim();
           if (!text) continue;
           const entry = {
-            id: createEventId(),
+            entryId: createEventId(),
             speakerId: user._id,
             speakerName: user.fullName,
             text,
@@ -590,20 +590,51 @@ const VideoCallModal = ({
     }
   };
 
-  const downloadTranscript = () => {
-    if (!transcriptEntries.length) return;
-    const lines = transcriptEntries.map((entry) => {
-      const time = new Date(entry.timestamp).toLocaleTimeString();
-      const speaker = entry.speakerId === user._id ? 'You' : entry.speakerName;
-      return `[${time}] ${speaker}: ${entry.text}`;
-    });
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `transcript-${callId}.txt`;
-    link.click();
-    URL.revokeObjectURL(url);
+  useEffect(() => {
+    if (!isOpen || !callId) return;
+    const intervalId = setInterval(() => {
+      if (pendingEntriesRef.current.length > 0) {
+        const entries = [...pendingEntriesRef.current];
+        pendingEntriesRef.current = [];
+        saveTranscriptEntries(callId, entries).catch(() => {});
+      }
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [isOpen, callId]);
+
+  const downloadTranscript = async () => {
+    try {
+      if (!callId) {
+        toast.error("No valid call reference found.");
+        return;
+      }
+      setIsDownloadingTranscript(true);
+      
+      const response = await getTranscript(callId);
+      
+      if (!response || !response.cloudinaryUrl) {
+        toast.error("Transcript file could not be generated.");
+        setIsDownloadingTranscript(false);
+        return;
+      }
+
+      const link = document.createElement('a');
+      link.href = response.cloudinaryUrl;
+      link.target = "_blank";
+      link.download = `Transcript-${callId}.txt`;
+      link.click();
+      
+      toast.success("Transcript downloaded");
+      setIsDownloadingTranscript(false);
+    } catch (error) {
+      console.error("Error downloading transcript:", error);
+      setIsDownloadingTranscript(false);
+      if (error?.response?.status === 404) {
+        toast.error("No transcript available for this meeting.");
+      } else {
+        toast.error("Failed to download transcript.");
+      }
+    }
   };
 
   const ensureBoardSizeForPoints = (points = [], scope = 'shared') => {
@@ -687,7 +718,8 @@ const VideoCallModal = ({
 
       if (custom.type === TRANSCRIPT_EVENT) {
         const entry = custom.entry;
-        if (!entry?.id || entry.speakerId === user?._id) return;
+        const keyId = entry?.entryId || entry?.id;
+        if (!keyId || entry.speakerId === user?._id) return;
         appendTranscriptEntry(entry);
       }
     });
@@ -762,6 +794,7 @@ const VideoCallModal = ({
       registerCustomEventHandlers(videoCall);
       setCall(videoCall);
       setIsInCallMicEnabled(isMicEnabled);
+      micEnabledRef.current = isMicEnabled;
       setIsInCallCamEnabled(callType === 'video' ? isCamEnabled : false);
       setPreviewStream((current) => {
         current?.getTracks().forEach((track) => track.stop());
@@ -773,9 +806,10 @@ const VideoCallModal = ({
         conversationId,
         type: callType,
         startTime: new Date().toISOString(),
+        hostId: videoCall?.state?.createdBy?.id || (isInitiator ? user._id : callerUserId),
         participants: Array.from(new Set(participantNames)).filter(Boolean),
         participantIds: Array.from(new Set(participantIds)).filter((id) => id && id !== user._id),
-        participantProfiles: meetingRoster.filter((member) => !member.isYou),
+        participantProfiles: participantProfiles.filter((member) => !member.isYou && member.id !== user._id),
         status: 'started',
       };
 
@@ -873,10 +907,15 @@ const VideoCallModal = ({
       if (isInCallMicEnabled) {
         await activeCall.microphone.disable();
         setIsInCallMicEnabled(false);
+        // Mark mic as muted so speech recognition discards all results (privacy guard)
+        micEnabledRef.current = false;
+        setTranscriptDraft('');
       } else {
         await activeCall.microphone.enable();
         if (selectedMicId) await activeCall.microphone.select(selectedMicId);
         setIsInCallMicEnabled(true);
+        // Allow speech recognition results again
+        micEnabledRef.current = true;
       }
     } catch (error) {
       console.error('Microphone toggle error:', error);
@@ -919,16 +958,9 @@ const VideoCallModal = ({
         updateCallLog(callId, {
           status: 'left',
           lastLeftAt: new Date().toISOString(),
+          endTime: new Date().toISOString(),
         });
-        upsertActiveCall({
-          callId,
-          conversationId,
-          type: callType,
-          participantIds: Array.from(new Set(participantIds)).filter(Boolean),
-          participantNames: Array.from(new Set(participantNames)).filter(Boolean),
-          participantProfiles: meetingRoster.filter((member) => !member.isYou),
-          status: 'ongoing',
-        });
+        removeActiveCall(callId);
         await activeCall?.leave();
       }
     } catch (_) {
@@ -1658,11 +1690,15 @@ const VideoCallModal = ({
                                 >
                                   {isTranscribing ? 'Pause' : 'Resume'}
                                 </button>
-                                {transcriptEntries.length > 0 && (
-                                  <button onClick={downloadTranscript} className="btn btn-xs btn-ghost gap-1" title="Download transcript as text">
-                                    <DownloadIcon className="size-3" /> Save
+                                  <button
+                                    onClick={downloadTranscript}
+                                    disabled={isDownloadingTranscript}
+                                    className="btn btn-xs btn-ghost gap-1"
+                                    title="Download transcript as text"
+                                  >
+                                    <DownloadIcon className="size-3" />
+                                    {isDownloadingTranscript ? "Saving..." : "Save"}
                                   </button>
-                                )}
                               </div>
                             </div>
                             <div className="max-h-[28vh] flex-1 space-y-4 overflow-y-auto px-4 py-4 xl:max-h-none">
