@@ -80,6 +80,7 @@ const GlobalVideoCallHandler = () => {
       participantNames,
       participantProfiles,
       startedAt: event.created_at || new Date().toISOString(),
+      isChannel: Boolean(event.call?.custom?.isChannel),
     };
   };
 
@@ -188,6 +189,7 @@ const GlobalVideoCallHandler = () => {
           participantIds: loggedCall.participantIds || [],
           participantProfiles: loggedCall.participantProfiles || [],
           status: 'missed',
+          isChannel: loggedCall.isChannel,
         });
         removeActiveCall(endedCallId);
       }
@@ -254,6 +256,7 @@ const GlobalVideoCallHandler = () => {
       participantProfiles: accepted.participantProfiles || [],
       callType: accepted.type || 'video',
       callerUserId: accepted.callerUserId,
+      isChannel: accepted.isChannel,
     });
     setShowVideoCall(true);
 
@@ -291,6 +294,7 @@ const GlobalVideoCallHandler = () => {
       participantIds: declined.participantIds || [],
       participantProfiles: declined.participantProfiles || [],
       status: 'missed',
+      isChannel: declined.isChannel,
     });
     removeActiveCall(declined.callId);
   };
@@ -330,6 +334,7 @@ const GlobalVideoCallHandler = () => {
           callType={callInfo.callType}
           conversationId={callInfo.conversationId}
           callerUserId={callInfo.callerUserId}
+          isChannel={callInfo.isChannel}
         />
       )}
     </>

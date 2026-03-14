@@ -39,6 +39,20 @@ const getHostProfile = (log, authUser) => {
   };
 };
 
+const getChannelName = (log) => {
+  if (log.isChannel && log.conversationId) {
+    const parts = log.conversationId.split("-");
+    const last = parts[parts.length - 1];
+    return last.charAt(0).toUpperCase() + last.slice(1);
+  }
+  return null;
+};
+
+const getDisplayName = (log) => {
+  if (log.participants?.length > 0) return log.participants.join(", ");
+  return log.isChannel ? "Channel Meeting" : "Personal Call";
+};
+
 const MeetingRecordsPage = () => {
   const { authUser } = useAuthUser();
   const [isDownloading, setIsDownloading] = useState(false);
@@ -54,7 +68,7 @@ const MeetingRecordsPage = () => {
 
   // Filter logs: mirror previous logic but now using backend data
   const myMeetings = useMemo(() => {
-    return callLogs.filter(log => log.status !== 'missed' && log.status !== 'ringing');
+    return callLogs.filter(log => log.status !== 'ringing');
   }, [callLogs]);
 
   const handleDownloadTranscript = async (log) => {
@@ -169,11 +183,30 @@ const MeetingRecordsPage = () => {
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                       {log.type === 'video' ? <Video className="size-4 text-primary" /> : <Phone className="size-4 text-success" />}
                       <h3 className="text-lg font-bold text-base-content truncate">
-                        {log.participants?.length > 0 ? log.participants.join(", ") : "Call"}
+                        {getDisplayName(log)}
                       </h3>
+                      
+                      {/* Status/Direction Tags */}
+                      <div className="flex items-center gap-1.5 ml-1">
+                        {log.status === 'missed' ? (
+                          <span className="badge badge-error badge-sm font-bold gap-1 px-2">Missed</span>
+                        ) : log.hostId === authUser?._id ? (
+                          <span className="badge badge-info badge-sm font-bold gap-1 px-2">Outgoing</span>
+                        ) : (
+                          <span className="badge badge-success badge-sm font-bold gap-1 px-2">Incoming</span>
+                        )}
+                        
+                        {log.isChannel ? (
+                          <span className="badge badge-outline badge-sm border-primary/30 text-primary font-bold px-2">
+                            #{getChannelName(log)}
+                          </span>
+                        ) : (
+                          <span className="badge badge-outline badge-sm border-base-content/20 text-base-content/60 font-medium px-2">Personal</span>
+                        )}
+                      </div>
                     </div>
                     
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-base-content/70">

@@ -203,6 +203,7 @@ const VideoCallModal = ({
   callType = 'video',
   conversationId = '',
   callerUserId = null,
+  isChannel = false,
 }) => {
   const [client, setClient] = useState(null);
   const [call, setCall] = useState(null);
@@ -758,7 +759,7 @@ const VideoCallModal = ({
           data: {
             members: uniqueParticipantIds.map((id) => ({ user_id: id })),
             ...(team ? { team } : {}),
-            custom: { conversationId },
+            custom: { conversationId, isChannel },
           },
         });
       } else {
@@ -811,6 +812,7 @@ const VideoCallModal = ({
         participantIds: Array.from(new Set(participantIds)).filter((id) => id && id !== user._id),
         participantProfiles: participantProfiles.filter((member) => !member.isYou && member.id !== user._id),
         status: 'started',
+        isChannel,
       };
 
       await saveCallLog(callLog);

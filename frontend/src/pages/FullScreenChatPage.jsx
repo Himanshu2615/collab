@@ -562,6 +562,7 @@ const FullScreenChatPage = () => {
         participantProfiles={callParticipantProfiles}
         callType={callType}
         conversationId={conversationId}
+        isChannel={isChannel}
       />
       <CallLogsPanel
         isOpen={showCallLogs}
