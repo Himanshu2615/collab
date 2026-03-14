@@ -1,10 +1,11 @@
-import { useEffect, useState, useMemo } from "react";
-import { getCallLogs, subscribeToCallStore } from "../lib/callHistory";
-import { getTranscript, getTranscriptSummary } from "../lib/api";
+import { useState, useMemo } from "react";
+import { getTranscript, getTranscriptSummary, getCallLogsApi } from "../lib/api";
 import useAuthUser from "../hooks/useAuthUser";
 import { CalendarDays, Clock, Download, FileText, Users, Video, Phone, History, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
 import toast from "react-hot-toast";
 import Avatar from "../components/Avatar";
+import { useQuery } from "@tanstack/react-query";
+import ChatLoader from "../components/ChatLoader";
 
 const formatDuration = (startTime, endTime) => {
   if (!startTime || !endTime) return "Ongoing";
@@ -27,7 +28,6 @@ const getHostProfile = (log, authUser) => {
 
   // Fallback to the first available participant if host isn't declared
   if (Array.isArray(log?.participantProfiles) && log.participantProfiles.length > 0) {
-    // If we initiated it but hostId didn't save for some reason
     return log.participantProfiles[0];
   }
 
@@ -41,19 +41,18 @@ const getHostProfile = (log, authUser) => {
 
 const MeetingRecordsPage = () => {
   const { authUser } = useAuthUser();
-  const [callLogs, setCallLogs] = useState([]);
   const [isDownloading, setIsDownloading] = useState(false);
   const [expandedSummaryId, setExpandedSummaryId] = useState(null);
   const [summaries, setSummaries] = useState({});
   const [isSummarizing, setIsSummarizing] = useState({});
 
-  useEffect(() => {
-    const refresh = () => setCallLogs(getCallLogs());
-    refresh();
-    return subscribeToCallStore(refresh);
-  }, []);
+  const { data: callLogs = [], isLoading } = useQuery({
+    queryKey: ["callLogs"],
+    queryFn: getCallLogsApi,
+    enabled: !!authUser,
+  });
 
-  // Filter logs: only video/voice calls (exclude missed if you only want actual meetings, but let's show all that happened)
+  // Filter logs: mirror previous logic but now using backend data
   const myMeetings = useMemo(() => {
     return callLogs.filter(log => log.status !== 'missed' && log.status !== 'ringing');
   }, [callLogs]);
@@ -68,18 +67,15 @@ const MeetingRecordsPage = () => {
       
       const response = await getTranscript(log.callId);
       
-      // We expect the backend to return { cloudinaryUrl } if it was successfully generated
       if (!response || !response.cloudinaryUrl) {
         toast.error("Transcript file could not be generated.");
         setIsDownloading(false);
         return;
       }
 
-      // Open the Cloudinary raw URL in a new tab/download
       const link = document.createElement('a');
       link.href = response.cloudinaryUrl;
       link.target = "_blank";
-      // Cloudinary 'raw' files with appropriate flags usually force download
       link.download = `Transcript-${log.callId}.txt`;
       link.click();
       
@@ -103,8 +99,6 @@ const MeetingRecordsPage = () => {
     }
 
     setExpandedSummaryId(log.callId);
-
-    // If we already have it, no need to fetch
     if (summaries[log.callId]) return;
 
     try {
@@ -129,6 +123,8 @@ const MeetingRecordsPage = () => {
       setIsSummarizing(prev => ({ ...prev, [log.callId]: false }));
     }
   };
+
+  if (isLoading) return <ChatLoader />;
 
   return (
     <div className="max-w-6xl mx-auto p-6 lg:p-10 w-full h-full overflow-y-auto">
@@ -155,15 +151,13 @@ const MeetingRecordsPage = () => {
       ) : (
         <div className="grid gap-4">
           {myMeetings.map((log) => {
-            const date = new Date(log.startTime || log.updatedAt || new Date());
+            const date = new Date(log.startTime || log.createdAt || log.updatedAt || new Date());
             const hostProfile = getHostProfile(log, authUser);
             const profiles = log.participantProfiles || [];
             
             return (
               <div key={log.callId} className="flex flex-col gap-2">
-                {/* Main Card */}
                 <div className="bg-base-100 border border-base-300 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col sm:flex-row sm:items-center gap-5">
-                  {/* Date/Time Block */}
                   <div className="flex flex-row sm:flex-col items-center sm:items-start gap-3 sm:gap-1 min-w-[120px] shrink-0">
                     <div className="text-sm font-bold text-base-content/80 bg-base-200 px-3 py-1 rounded-lg">
                       {date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -174,7 +168,6 @@ const MeetingRecordsPage = () => {
                     </div>
                   </div>
 
-                  {/* Details */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
                       {log.type === 'video' ? <Video className="size-4 text-primary" /> : <Phone className="size-4 text-success" />}
@@ -201,7 +194,6 @@ const MeetingRecordsPage = () => {
                     </div>
                   </div>
 
-                  {/* Actions / Participants */}
                   <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 shrink-0 border-t sm:border-t-0 sm:border-l border-base-300 pt-4 sm:pt-0 sm:pl-5">
                     {profiles.length > 0 && (
                       <div className="flex -space-x-1.5 mb-2" title={`${profiles.length} participants`}>
@@ -242,7 +234,6 @@ const MeetingRecordsPage = () => {
                   </div>
                 </div>
                 
-                {/* Summary Expandable Panel */}
                 {expandedSummaryId === log.callId && (
                   <div className="mt-2 p-5 bg-gradient-to-br from-primary/5 to-transparent border border-primary/20 rounded-2xl text-base-content/80 text-sm leading-relaxed prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1">
                     <div className="flex items-center gap-2 mb-3 text-primary font-bold">
@@ -270,3 +261,4 @@ const MeetingRecordsPage = () => {
 };
 
 export default MeetingRecordsPage;
+

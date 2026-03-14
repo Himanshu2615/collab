@@ -216,3 +216,14 @@ export async function getOrgMembers() {
   return response.data;
 }
 
+
+/* ── Call Logs ── */
+export const saveCallLogApi = async (data) => {
+  const res = await axiosInstance.post("/call-logs", data);
+  return res.data;
+};
+
+export const getCallLogsApi = async () => {
+  const res = await axiosInstance.get("/call-logs");
+  return res.data;
+};

@@ -98,6 +98,7 @@ const GlobalVideoCallHandler = () => {
     videoClientRef.current = videoClient;
 
     const handleIncomingRingEvent = (event) => {
+      console.log("[GlobalVideoCallHandler] Received ring/notification event:", event.type, event.call_cid);
       const nextIncomingCall = buildIncomingCallFromEvent(event);
       if (!nextIncomingCall) return;
 
@@ -155,7 +156,19 @@ const GlobalVideoCallHandler = () => {
     const unsubscribeRing = videoClient.on('call.ring', handleIncomingRingEvent);
     const unsubscribeNotification = videoClient.on('call.notification', handleIncomingRingEvent);
 
-    const logMissedCall = (endedCallId) => {
+    const handleCallMissedEvent = (event) => {
+      console.log("[GlobalVideoCallHandler] Received call.missed event:", event.call?.id);
+      const id = event.call?.id || event.call_cid?.split(':')[1];
+      if (id && activeIncomingCallIdRef.current === id) {
+        setIncomingCall(null);
+        activeIncomingCallIdRef.current = null;
+        mutedIncomingCallRef.current = null;
+        removeActiveCall(id);
+      }
+    };
+    const unsubscribeMissed = videoClient.on('call.missed', handleCallMissedEvent);
+
+    const logMissedCall = async (endedCallId) => {
       const current = incomingCallRef.current;
       const loggedCall =
         current?.callId === endedCallId
@@ -164,7 +177,7 @@ const GlobalVideoCallHandler = () => {
           ? mutedIncomingCallRef.current
           : null;
       if (loggedCall) {
-        saveCallLog({
+        await saveCallLog({
           callId: endedCallId,
           conversationId: loggedCall.conversationId,
           type: loggedCall.type,
@@ -198,10 +211,11 @@ const GlobalVideoCallHandler = () => {
       }
     });
 
-    const unsubscribeEnd = videoClient.on('call.ended', (event) => {
+    const unsubscribeEnd = videoClient.on('call.ended', async (event) => {
       const id = event.call?.id || event.call_cid?.split(':')[1];
+      console.log("[GlobalVideoCallHandler] Received call.ended event:", id);
       if (id) {
-        updateCallLog(id, { endTime: new Date().toISOString(), status: 'ended' });
+        await updateCallLog(id, { endTime: new Date().toISOString(), status: 'ended' });
         removeActiveCall(id);
       }
       if (id && activeIncomingCallIdRef.current === id) {
@@ -215,14 +229,12 @@ const GlobalVideoCallHandler = () => {
     return () => {
       unsubscribeRing?.();
       unsubscribeNotification?.();
+      unsubscribeMissed?.();
       unsubscribeReject?.();
       unsubscribeAccept?.();
       unsubscribeEnd?.();
-      // Fully disconnect the video client so the next login starts fresh.
-      if (videoClientRef.current) {
-        videoClientRef.current.disconnectUser?.().catch(() => {});
-        videoClientRef.current = null;
-      }
+      // NOTE: We don't disconnect the user here to avoid signaling gaps during token refreshes.
+      // The client instance is managed by StreamVideoClient.getOrCreateInstance.
     };
   }, [authUser, tokenData, navigate]);
 
@@ -268,7 +280,7 @@ const GlobalVideoCallHandler = () => {
       console.error('Error declining call:', err);
     }
 
-    saveCallLog({
+    await saveCallLog({
       callId: declined.callId,
       conversationId: declined.conversationId,
       type: declined.type,

@@ -13,6 +13,8 @@ import fileRoutes from "./routes/file.route.js";
 import meetingRoutes from "./routes/meeting.route.js";
 import folderRoutes from "./routes/folder.route.js";
 import transcriptRoutes from "./routes/transcript.route.js";
+import callLogRoutes from "./routes/callLog.route.js";
+
 
 
 
@@ -45,6 +47,8 @@ app.use("/api/files", fileRoutes);
 app.use("/api/folders", folderRoutes);
 app.use("/api/meetings", meetingRoutes);
 app.use("/api/transcripts", transcriptRoutes);
+app.use("/api/call-logs", callLogRoutes);
+
 
 
 

@@ -813,7 +813,7 @@ const VideoCallModal = ({
         status: 'started',
       };
 
-      saveCallLog(callLog);
+      await saveCallLog(callLog);
       upsertActiveCall({
         ...callLog,
         status: 'ongoing',
@@ -879,7 +879,7 @@ const VideoCallModal = ({
       });
       await activeCall.ring();
 
-      updateCallLog(callId, {
+      await updateCallLog(callId, {
         lastRangAt: new Date().toISOString(),
         ringAgainCount: ((JSON.parse(localStorage.getItem('callLogs') || '[]').find((entry) => entry.callId === callId)?.ringAgainCount) || 0) + 1,
       });
@@ -948,14 +948,14 @@ const VideoCallModal = ({
       const participants = activeCall?.state?.participants || [];
       // If we are the only participant left in the call (or 0 somehow)
       if (participants.length <= 1) {
-        updateCallLog(callId, {
+        await updateCallLog(callId, {
           status: 'ended',
           endTime: new Date().toISOString(),
         });
         removeActiveCall(callId);
         await activeCall?.endCall();
       } else {
-        updateCallLog(callId, {
+        await updateCallLog(callId, {
           status: 'left',
           lastLeftAt: new Date().toISOString(),
           endTime: new Date().toISOString(),
