@@ -3,6 +3,11 @@ import FriendRequest from "../models/FriendRequest.js";
 import File from "../models/File.js";
 import Meeting from "../models/Meeting.js";
 import mongoose from "mongoose";
+import {
+  emitNotificationEvent,
+  subscribeNotificationStream,
+  unsubscribeNotificationStream,
+} from "../lib/notificationStream.js";
 
 const USER_CODE_REGEX = /^[A-Z0-9]{6}$/;
 
@@ -235,6 +240,12 @@ export async function sendFriendRequest(req, res) {
       recipient: recipientId,
     });
 
+    emitNotificationEvent(recipientId, {
+      type: "friend-request:new",
+      friendRequestId: friendRequest._id,
+      sender: myId,
+    });
+
     res.status(201).json(friendRequest);
   } catch (error) {
     console.error("Error in sendFriendRequest controller", error.message);
@@ -270,6 +281,12 @@ export async function acceptFriendRequest(req, res) {
       }),
     ]);
 
+    emitNotificationEvent(friendRequest.sender.toString(), {
+      type: "friend-request:accepted",
+      friendRequestId: friendRequest._id,
+      recipient: friendRequest.recipient,
+    });
+
     res.status(200).json({ message: "Friend request accepted" });
   } catch (error) {
     console.log("Error in acceptFriendRequest controller", error.message);
@@ -292,6 +309,12 @@ export async function declineFriendRequest(req, res) {
     }
 
     await FriendRequest.findByIdAndDelete(requestId);
+
+    emitNotificationEvent(friendRequest.sender.toString(), {
+      type: "friend-request:declined",
+      friendRequestId: friendRequest._id,
+      recipient: friendRequest.recipient,
+    });
 
     res.status(200).json({ message: "Friend request declined" });
   } catch (error) {
@@ -332,4 +355,36 @@ export async function getOutgoingFriendReqs(req, res) {
     console.log("Error in getOutgoingFriendReqs controller", error.message);
     res.status(500).json({ message: "Internal Server Error" });
   }
+}
+
+export async function streamNotifications(req, res) {
+  const userId = req.user.id;
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+
+  subscribeNotificationStream(userId, res);
+
+  res.write(`event: connected\n`);
+  res.write(`data: ${JSON.stringify({ timestamp: Date.now() })}\n\n`);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`event: heartbeat\n`);
+      res.write(`data: ${Date.now()}\n\n`);
+    } catch {
+      // socket likely closed; cleanup handled below
+    }
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribeNotificationStream(userId, res);
+  });
 }

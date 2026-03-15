@@ -1,20 +1,24 @@
 import { Link, useNavigate } from "react-router";
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
 import useAuthUser from "../hooks/useAuthUser";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getFriendRequests } from "../lib/api";
-import useDashboardSummary from "../hooks/useDashboardSummary";
 import { BellIcon, LogOutIcon, SearchIcon, SettingsIcon, UserIcon } from "lucide-react";
+import { buildNotificationKeys, getNotificationStateEventName, getSeenNotificationIds } from "../lib/notificationState";
 import ThemeSelector from "./ThemeSelector";
 import useLogout from "../hooks/useLogout";
 import Avatar from "./Avatar";
 
 const Navbar = () => {
   const { authUser } = useAuthUser();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { logoutMutation } = useLogout();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [notificationVersion, setNotificationVersion] = useState(0);
   const menuRef = useRef(null);
+  const previousNotificationKeysRef = useRef(new Set());
+  const initializedNotificationSnapshotRef = useRef(false);
 
   // Close when clicking outside
   useEffect(() => {
@@ -27,17 +31,94 @@ const Navbar = () => {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const { data: dashboardData } = useDashboardSummary();
-
   const { data: friendRequestsData } = useQuery({
     queryKey: ["friendRequests"],
     queryFn: getFriendRequests,
-    enabled: !!authUser && !dashboardData,
+    enabled: !!authUser,
     staleTime: 60_000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: false,
   });
 
-  const incomingCount = dashboardData?.incomingReqs?.length ?? friendRequestsData?.incomingReqs?.length ?? 0;
+  useEffect(() => {
+    if (!authUser) return undefined;
+
+    const baseUrl = import.meta.env.MODE === "development" ? "http://localhost:5000/api" : "/api";
+    const source = new EventSource(`${baseUrl}/users/stream`, { withCredentials: true });
+
+    const refreshNotifications = () => {
+      queryClient.invalidateQueries({ queryKey: ["friendRequests"] });
+    };
+
+    source.addEventListener("notification", refreshNotifications);
+    source.addEventListener("connected", refreshNotifications);
+
+    source.onerror = () => {
+      // Keep connection open; native EventSource will auto-reconnect.
+    };
+
+    return () => {
+      source.removeEventListener("notification", refreshNotifications);
+      source.removeEventListener("connected", refreshNotifications);
+      source.close();
+    };
+  }, [authUser, queryClient]);
+
+  const notificationKeys = buildNotificationKeys(friendRequestsData || {});
+  const unreadCount = useMemo(() => {
+    const seen = getSeenNotificationIds();
+    return notificationKeys.reduce((count, key) => (seen.has(key) ? count : count + 1), 0);
+  }, [notificationKeys, notificationVersion]);
+
+  useEffect(() => {
+    const eventName = getNotificationStateEventName();
+    const refresh = () => setNotificationVersion((v) => v + 1);
+    window.addEventListener(eventName, refresh);
+    return () => window.removeEventListener(eventName, refresh);
+  }, []);
+
+  useEffect(() => {
+    const currentKeys = new Set(notificationKeys);
+
+    if (!initializedNotificationSnapshotRef.current) {
+      previousNotificationKeysRef.current = currentKeys;
+      initializedNotificationSnapshotRef.current = true;
+      return;
+    }
+
+    const newKeys = notificationKeys.filter((key) => !previousNotificationKeysRef.current.has(key));
+    previousNotificationKeysRef.current = currentKeys;
+
+    if (!newKeys.length) return;
+    if (typeof Notification === "undefined") return;
+    if (window.location.pathname === "/notifications" && document.visibilityState === "visible") return;
+
+    const notify = () => {
+      try {
+        new Notification("Collab Notifications", {
+          body: newKeys.length === 1
+            ? "You have 1 new notification"
+            : `You have ${newKeys.length} new notifications`,
+          icon: "/favicon.ico",
+          tag: "collab-notifications",
+          renotify: true,
+        });
+      } catch {
+        // ignore browser notification errors
+      }
+    };
+
+    if (Notification.permission === "granted") {
+      notify();
+      return;
+    }
+
+    if (Notification.permission === "default") {
+      Notification.requestPermission().then((permission) => {
+        if (permission === "granted") notify();
+      });
+    }
+  }, [notificationKeys]);
 
   const handleSearchKey = (e) => {
     if (e.key === "Enter" && e.target.value.trim()) {
@@ -72,9 +153,9 @@ const Navbar = () => {
           <Link to="/notifications" className="relative">
             <button className="btn btn-ghost btn-sm btn-circle">
               <BellIcon className="h-5 w-5 text-base-content/70" />
-              {incomingCount > 0 && (
+              {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-error text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5 border-2 border-base-100 leading-none">
-                  {incomingCount > 9 ? "9+" : incomingCount}
+                  {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
             </button>

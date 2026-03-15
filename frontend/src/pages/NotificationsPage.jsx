@@ -3,6 +3,8 @@ import { acceptFriendRequest, declineFriendRequest, getFriendRequests } from "..
 import { BellIcon, ClockIcon, MessageSquareIcon, UserCheckIcon, XIcon } from "lucide-react";
 import NoNotificationsFound from "../components/NoNotificationsFound";
 import Avatar from "../components/Avatar";
+import { useEffect } from "react";
+import { buildNotificationKeys, markNotificationsAsSeen } from "../lib/notificationState";
 
 
 
@@ -12,6 +14,9 @@ const NotificationsPage = () => {
   const { data: friendRequests, isLoading } = useQuery({
     queryKey: ["friendRequests"],
     queryFn: getFriendRequests,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    refetchInterval: false,
   });
 
   const { mutate: acceptRequestMutation, isPending } = useMutation({
@@ -32,6 +37,15 @@ const NotificationsPage = () => {
 
   const incomingRequests = friendRequests?.incomingReqs || [];
   const acceptedRequests = friendRequests?.acceptedReqs || [];
+
+  useEffect(() => {
+    if (isLoading) return;
+    const keys = buildNotificationKeys({
+      incomingReqs: incomingRequests,
+      acceptedReqs: acceptedRequests,
+    });
+    markNotificationsAsSeen(keys);
+  }, [acceptedRequests, incomingRequests, isLoading]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">

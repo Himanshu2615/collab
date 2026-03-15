@@ -33,8 +33,18 @@ app.use(
   })
 );
 
-// Compress all responses — typically 60-80% smaller JSON payloads
-app.use(compression());
+// Compress all responses except SSE streams (compression buffers chunks and
+// can delay realtime delivery).
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (req.path === "/api/users/stream" || req.headers.accept === "text/event-stream") {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  })
+);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());

@@ -11,6 +11,7 @@ import {
   getRecommendedUsers,
   lookupUserById,
   sendFriendRequest,
+  streamNotifications,
 } from "../controllers/user.controller.js";
 
 
@@ -20,6 +21,7 @@ const router = express.Router();
 router.use(protectRoute);
 
 router.get("/dashboard-summary", getDashboardSummary);
+router.get("/stream", streamNotifications);
 router.get("/user-code/availability", checkUserCodeAvailability);
 router.get("/lookup/:id", lookupUserById);
 router.get("/", getRecommendedUsers);
