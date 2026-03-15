@@ -4,6 +4,8 @@ import File from "../models/File.js";
 import Meeting from "../models/Meeting.js";
 import mongoose from "mongoose";
 
+const USER_CODE_REGEX = /^[A-Z0-9]{6}$/;
+
 const getTodayRange = () => {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -120,25 +122,31 @@ export async function getMyFriends(req, res) {
 
 export async function lookupUserById(req, res) {
   try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid user ID" });
+    const rawId = (req.params.id || "").trim();
+    if (!rawId) {
+      return res.status(400).json({ message: "User ID is required" });
     }
 
-    if (id === req.user.id) {
-      return res.status(400).json({ message: "You cannot look up yourself" });
-    }
+    const normalizedCode = rawId.toUpperCase();
+    const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
 
-    const user = await User.findById(id)
-      .select("_id fullName profilePic nativeLanguage learningLanguage bio location organization")
+    const lookupQuery = isObjectId
+      ? { $or: [{ _id: rawId }, { userCode: normalizedCode }] }
+      : { userCode: normalizedCode };
+
+    const user = await User.findOne(lookupQuery)
+      .select("_id userCode fullName profilePic nativeLanguage learningLanguage bio location organization")
       .lean();
 
     if (!user || !user.fullName) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (req.user.friends?.some((friendId) => friendId.toString() === id)) {
+    if (user._id.toString() === req.user.id) {
+      return res.status(400).json({ message: "You cannot look up yourself" });
+    }
+
+    if (req.user.friends?.some((friendId) => friendId.toString() === user._id.toString())) {
       return res.status(200).json({
         success: true,
         user: {
@@ -151,8 +159,8 @@ export async function lookupUserById(req, res) {
 
     const existingRequest = await FriendRequest.findOne({
       $or: [
-        { sender: req.user.id, recipient: id },
-        { sender: id, recipient: req.user.id },
+        { sender: req.user.id, recipient: user._id },
+        { sender: user._id, recipient: req.user.id },
       ],
     }).select("status sender recipient").lean();
 
@@ -167,6 +175,21 @@ export async function lookupUserById(req, res) {
     });
   } catch (error) {
     console.error("Error in lookupUserById controller", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+}
+
+export async function checkUserCodeAvailability(req, res) {
+  try {
+    const code = (req.query.code || "").toString().trim().toUpperCase();
+    if (!USER_CODE_REGEX.test(code)) {
+      return res.status(400).json({ message: "User ID must be exactly 6 letters or digits" });
+    }
+
+    const existing = await User.findOne({ userCode: code }).select("_id").lean();
+    return res.status(200).json({ available: !existing, code });
+  } catch (error) {
+    console.error("Error in checkUserCodeAvailability controller", error.message);
     res.status(500).json({ message: "Internal Server Error" });
   }
 }

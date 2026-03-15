@@ -2,6 +2,7 @@ import express from "express";
 import { protectRoute } from "../middleware/auth.middleware.js";
 import {
   acceptFriendRequest,
+  checkUserCodeAvailability,
   declineFriendRequest,
   getDashboardSummary,
   getFriendRequests,
@@ -19,6 +20,7 @@ const router = express.Router();
 router.use(protectRoute);
 
 router.get("/dashboard-summary", getDashboardSummary);
+router.get("/user-code/availability", checkUserCodeAvailability);
 router.get("/lookup/:id", lookupUserById);
 router.get("/", getRecommendedUsers);
 router.get("/friends", getMyFriends);

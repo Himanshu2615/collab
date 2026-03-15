@@ -8,6 +8,33 @@ function createToken(userId) {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: "7d" });
 }
 
+const USER_CODE_REGEX = /^[A-Z0-9]{6}$/;
+
+const normalizeUserCode = (value) => {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value).trim().toUpperCase();
+  return normalized || "";
+};
+
+const ensureUniqueUserCode = async (candidate, excludeUserId = null) => {
+  const query = { userCode: candidate };
+  if (excludeUserId) query._id = { $ne: excludeUserId };
+  const existing = await User.findOne(query).select("_id").lean();
+  return !existing;
+};
+
+const generateUserCode = async () => {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  for (let i = 0; i < 25; i += 1) {
+    let candidate = "";
+    for (let j = 0; j < 6; j += 1) {
+      candidate += alphabet[Math.floor(Math.random() * alphabet.length)];
+    }
+    if (await ensureUniqueUserCode(candidate)) return candidate;
+  }
+  throw new Error("Could not generate unique user code");
+};
+
 export async function signup(req, res) {
   const { email, password, fullName } = req.body;
 
@@ -34,6 +61,7 @@ export async function signup(req, res) {
       email,
       fullName,
       password,
+      userCode: await generateUserCode(),
       profilePic: "", // intentionally empty — user sets a real photo during onboarding
     });
 
@@ -62,6 +90,9 @@ export async function signup(req, res) {
 
     res.status(201).json({ success: true, user: newUser });
   } catch (error) {
+    if (error?.code === 11000 && error?.keyPattern?.userCode) {
+      return res.status(409).json({ message: "That User ID is already taken" });
+    }
     console.log("Error in signup controller:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
@@ -118,7 +149,7 @@ export function logout(req, res) {
 export async function onboard(req, res) {
   try {
     const userId = req.user._id;
-    const { fullName, bio, nativeLanguage, learningLanguage, location } = req.body;
+    const { fullName, bio, nativeLanguage, learningLanguage, location, userCode } = req.body;
 
     if (!fullName || !bio || !nativeLanguage || !learningLanguage || !location) {
       return res.status(400).json({
@@ -131,6 +162,17 @@ export async function onboard(req, res) {
           !location && "location",
         ].filter(Boolean),
       });
+    }
+
+    const normalizedUserCode = normalizeUserCode(userCode);
+    if (normalizedUserCode !== undefined && normalizedUserCode !== "") {
+      if (!USER_CODE_REGEX.test(normalizedUserCode)) {
+        return res.status(400).json({ message: "User ID must be exactly 6 letters or digits" });
+      }
+      const isAvailable = await ensureUniqueUserCode(normalizedUserCode, userId);
+      if (!isAvailable) {
+        return res.status(409).json({ message: "That User ID is already taken" });
+      }
     }
     let profilePicUrl = req.body.profilePic || "";
 
@@ -151,7 +193,16 @@ export async function onboard(req, res) {
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { fullName, bio, nativeLanguage, learningLanguage, location, profilePic: profilePicUrl, isOnboarded: true },
+      {
+        fullName,
+        bio,
+        nativeLanguage,
+        learningLanguage,
+        location,
+        profilePic: profilePicUrl,
+        isOnboarded: true,
+        ...(normalizedUserCode ? { userCode: normalizedUserCode } : {}),
+      },
       { new: true, runValidators: true }
     ).populate("organization");
 
@@ -173,6 +224,9 @@ export async function onboard(req, res) {
 
     res.status(200).json({ success: true, user: updatedUser });
   } catch (error) {
+    if (error?.code === 11000 && error?.keyPattern?.userCode) {
+      return res.status(409).json({ message: "That User ID is already taken" });
+    }
     console.error("Onboarding error:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
@@ -181,7 +235,7 @@ export async function onboard(req, res) {
 export async function updateProfile(req, res) {
   try {
     const userId = req.user._id;
-    const { fullName, bio, nativeLanguage, learningLanguage, location, profilePic } = req.body;
+    const { fullName, bio, nativeLanguage, learningLanguage, location, profilePic, userCode } = req.body;
 
     let profilePicUrl = profilePic;
 
@@ -198,11 +252,33 @@ export async function updateProfile(req, res) {
       }
     }
 
+    const normalizedUserCode = normalizeUserCode(userCode);
+    if (normalizedUserCode !== undefined) {
+      if (normalizedUserCode === "") {
+        return res.status(400).json({ message: "User ID cannot be empty" });
+      }
+      if (!USER_CODE_REGEX.test(normalizedUserCode)) {
+        return res.status(400).json({ message: "User ID must be exactly 6 letters or digits" });
+      }
+      const isAvailable = await ensureUniqueUserCode(normalizedUserCode, userId);
+      if (!isAvailable) {
+        return res.status(409).json({ message: "That User ID is already taken" });
+      }
+    }
+
     // Build update object — omit profilePic entirely if upload failed or no new
     // image was provided (keeps existing Cloudinary URL in the database).
-    const updateFields = { fullName, bio, nativeLanguage, learningLanguage, location };
+    const updateFields = {};
+    if (fullName !== undefined) updateFields.fullName = fullName;
+    if (bio !== undefined) updateFields.bio = bio;
+    if (nativeLanguage !== undefined) updateFields.nativeLanguage = nativeLanguage;
+    if (learningLanguage !== undefined) updateFields.learningLanguage = learningLanguage;
+    if (location !== undefined) updateFields.location = location;
     if (profilePicUrl !== undefined && profilePicUrl !== "") {
       updateFields.profilePic = profilePicUrl;
+    }
+    if (normalizedUserCode !== undefined) {
+      updateFields.userCode = normalizedUserCode;
     }
 
     const updatedUser = await User.findByIdAndUpdate(
@@ -230,6 +306,9 @@ export async function updateProfile(req, res) {
 
     res.status(200).json({ success: true, user: updatedUser });
   } catch (error) {
+    if (error?.code === 11000 && error?.keyPattern?.userCode) {
+      return res.status(409).json({ message: "That User ID is already taken" });
+    }
     console.error("updateProfile error:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }

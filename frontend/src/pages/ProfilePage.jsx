@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import { updateProfile } from "../lib/api";
+import { checkUserCodeAvailability, updateProfile } from "../lib/api";
 import { setCachedAuthUser } from "../lib/authCache";
 import useAuthUser from "../hooks/useAuthUser";
 import {
     CameraIcon, SaveIcon, LoaderIcon, UserIcon,
-    MapPinIcon, GlobeIcon, FileTextIcon, ArrowLeftIcon, CopyIcon,
+    MapPinIcon, GlobeIcon, FileTextIcon, ArrowLeftIcon, CopyIcon, ShuffleIcon,
 } from "lucide-react";
 import { Link } from "react-router";
 import { LANGUAGES } from "../constants";
@@ -21,18 +21,21 @@ const ProfilePage = () => {
 
     const [form, setForm] = useState({
         fullName: "",
+        userCode: "",
         bio: "",
         nativeLanguage: "",
         learningLanguage: "",
         location: "",
         profilePic: "",
     });
+    const [isGeneratingUserId, setIsGeneratingUserId] = useState(false);
 
     // Sync from authUser once available
     useEffect(() => {
         if (!authUser) return;
         setForm({
             fullName: authUser.fullName || "",
+            userCode: authUser.userCode || "",
             bio: authUser.bio || "",
             nativeLanguage: authUser.nativeLanguage || "",
             learningLanguage: authUser.learningLanguage || "",
@@ -68,20 +71,55 @@ const ProfilePage = () => {
     const handleSubmit = (e) => {
         e.preventDefault();
         if (!form.fullName.trim()) return toast.error("Name is required");
+        const normalizedCode = form.userCode.trim().toUpperCase();
+        if (!/^[A-Z0-9]{6}$/.test(normalizedCode)) {
+            return toast.error("User ID must be exactly 6 letters or digits");
+        }
         // Only include profilePic when the user explicitly chose a new image.
         // Sending "" would overwrite the existing Cloudinary URL in the DB.
-        const payload = { ...form };
+        const payload = { ...form, userCode: normalizedCode };
         if (!payload.profilePic) delete payload.profilePic;
         save(payload);
+    };
+
+    const handleSaveUserId = () => {
+        const normalizedCode = form.userCode.trim().toUpperCase();
+        if (!/^[A-Z0-9]{6}$/.test(normalizedCode)) {
+            return toast.error("User ID must be exactly 6 letters or digits");
+        }
+        save({ userCode: normalizedCode });
     };
 
     const handleCopyUserId = async () => {
         if (!authUser?._id) return;
         try {
-            await navigator.clipboard.writeText(authUser._id);
+            await navigator.clipboard.writeText(form.userCode || authUser.userCode || "");
             toast.success("User ID copied");
         } catch {
             toast.error("Could not copy User ID");
+        }
+    };
+
+    const handleGenerateRandomUserId = async () => {
+        const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        const buildCandidate = () => Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+
+        setIsGeneratingUserId(true);
+        try {
+            for (let attempt = 0; attempt < 20; attempt += 1) {
+                const candidate = buildCandidate();
+                const result = await checkUserCodeAvailability(candidate);
+                if (result?.available) {
+                    set("userCode", candidate);
+                    toast.success("Random available ID generated");
+                    return;
+                }
+            }
+            toast.error("Could not find an available ID. Try again.");
+        } catch (error) {
+            toast.error(error?.response?.data?.message || "Could not generate ID right now");
+        } finally {
+            setIsGeneratingUserId(false);
         }
     };
 
@@ -103,19 +141,46 @@ const ProfilePage = () => {
 
                 <div className="card bg-base-200 border border-base-300 p-5 mb-6">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
+                        <div className="flex-1 min-w-0">
                             <p className="text-xs font-bold uppercase tracking-wider text-base-content/45">User ID</p>
-                            <p className="mt-1 break-all font-mono text-sm text-base-content/75">{authUser?._id || "Unavailable"}</p>
-                            <p className="mt-1 text-xs text-base-content/45">Share this ID on Team & Friends so someone can add you directly.</p>
+                            <div className="mt-1 flex flex-col sm:flex-row sm:items-center gap-2">
+                                <input
+                                    type="text"
+                                    value={form.userCode}
+                                    onChange={(e) => set("userCode", e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase())}
+                                    className="input input-bordered w-full sm:max-w-[220px] focus:input-primary font-mono tracking-[0.18em] uppercase"
+                                    placeholder="A1B2C3"
+                                />
+                                <span className="text-xs text-base-content/45">Exactly 6 letters or digits</span>
+                            </div>
+                            <p className="mt-1 text-xs text-base-content/45">This is your public friend ID used in Team & Friends lookup.</p>
                         </div>
-                        <button
-                            type="button"
-                            onClick={handleCopyUserId}
-                            disabled={!authUser?._id}
-                            className="btn btn-outline btn-sm gap-2 self-start sm:self-center"
-                        >
-                            <CopyIcon className="size-4" /> Copy ID
-                        </button>
+                        <div className="flex gap-2 self-start sm:self-center">
+                            <button
+                                type="button"
+                                onClick={handleGenerateRandomUserId}
+                                disabled={isGeneratingUserId || isPending}
+                                className="btn btn-ghost btn-sm gap-2"
+                            >
+                                {isGeneratingUserId ? <LoaderIcon className="size-4 animate-spin" /> : <ShuffleIcon className="size-4" />} Random
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleCopyUserId}
+                                disabled={!(form.userCode || authUser?.userCode)}
+                                className="btn btn-outline btn-sm gap-2"
+                            >
+                                <CopyIcon className="size-4" /> Copy ID
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveUserId}
+                                disabled={isPending || !/^[A-Z0-9]{6}$/.test(form.userCode.trim().toUpperCase())}
+                                className="btn btn-primary btn-sm"
+                            >
+                                Save ID
+                            </button>
+                        </div>
                     </div>
                 </div>
 

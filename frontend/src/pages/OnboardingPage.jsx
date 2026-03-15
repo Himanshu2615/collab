@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import useAuthUser from "../hooks/useAuthUser";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import { completeOnboarding } from "../lib/api";
+import { checkUserCodeAvailability, completeOnboarding } from "../lib/api";
 import { setCachedAuthUser } from "../lib/authCache";
 import {
   LoaderIcon,
@@ -49,9 +49,11 @@ const OnboardingPage = () => {
   const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
   const [step, setStep] = useState(1);
+  const [isGeneratingUserId, setIsGeneratingUserId] = useState(false);
 
   const [formState, setFormState] = useState({
     fullName: "",
+    userCode: "",
     bio: "",
     nativeLanguage: "",
     learningLanguage: "",
@@ -70,6 +72,7 @@ const OnboardingPage = () => {
     setFormState((prev) => ({
       ...prev,
       fullName: authUser.fullName || prev.fullName,
+      userCode: authUser.userCode || prev.userCode,
       bio: authUser.bio || prev.bio,
       nativeLanguage: authUser.nativeLanguage || prev.nativeLanguage,
       learningLanguage: authUser.learningLanguage || prev.learningLanguage,
@@ -113,8 +116,32 @@ const OnboardingPage = () => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const handleGenerateRandomUserId = async () => {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const buildCandidate = () => Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+
+    setIsGeneratingUserId(true);
+    try {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const candidate = buildCandidate();
+        const result = await checkUserCodeAvailability(candidate);
+        if (result?.available) {
+          set("userCode", candidate);
+          toast.success("Random available ID generated");
+          return;
+        }
+      }
+      toast.error("Could not find an available ID. Try again.");
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Could not generate ID right now");
+    } finally {
+      setIsGeneratingUserId(false);
+    }
+  };
+
   /* Step navigation */
-  const canAdvanceStep1 = formState.fullName.trim().length > 0 && formState.location.trim().length > 0;
+  const hasValidUserCode = !formState.userCode || /^[A-Z0-9]{6}$/.test(formState.userCode);
+  const canAdvanceStep1 = formState.fullName.trim().length > 0 && formState.location.trim().length > 0 && hasValidUserCode;
 
   const canAdvanceStep2 = formState.nativeLanguage && formState.learningLanguage;
   const canSubmit = formState.bio.trim().length > 0;
@@ -343,6 +370,33 @@ const OnboardingPage = () => {
                     placeholder="e.g. Mumbai, India"
                   />
                 </div>
+              </div>
+
+              <div className="form-control">
+                <label className="label pb-1">
+                  <span className="label-text font-medium">Public User ID</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={formState.userCode}
+                    onChange={(e) => set("userCode", e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase())}
+                    className="input input-bordered input-lg w-full focus:input-primary transition-colors font-mono tracking-[0.18em] uppercase"
+                    placeholder="A1B2C3"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateRandomUserId}
+                    disabled={isGeneratingUserId || isPending}
+                    className="btn btn-outline btn-lg"
+                    title="Generate available ID"
+                  >
+                    {isGeneratingUserId ? <LoaderIcon className="size-4 animate-spin" /> : <ShuffleIcon className="size-4" />}
+                  </button>
+                </div>
+                <label className="label pt-1">
+                  <span className="label-text-alt text-base-content/45">Optional · exactly 6 letters or digits</span>
+                </label>
               </div>
             </div>
           )}

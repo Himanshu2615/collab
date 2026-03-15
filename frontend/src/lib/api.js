@@ -107,6 +107,13 @@ export async function lookupUserById(userId) {
   return response.data;
 }
 
+export async function checkUserCodeAvailability(code) {
+  const response = await axiosInstance.get("/users/user-code/availability", {
+    params: { code },
+  });
+  return response.data;
+}
+
 export async function getDashboardSummary() {
   try {
     const response = await axiosInstance.get("/users/dashboard-summary");

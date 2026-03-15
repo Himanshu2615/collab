@@ -2,13 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getOrgMembers, getUserFriends, lookupUserById, sendFriendRequest } from "../lib/api";
 import FriendCard from "../components/FriendCard";
 import NoFriendsFound from "../components/NoFriendsFound";
-import { UsersIcon, SearchIcon, UserPlusIcon, CheckCircleIcon, HashIcon, HeartIcon, Building2Icon } from "lucide-react";
+import { UsersIcon, SearchIcon, UserPlusIcon, CheckCircleIcon, HashIcon, HeartIcon, Building2Icon, CopyIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import Avatar from "../components/Avatar";
 import { useStreamContext } from "../context/StreamContext";
+import useAuthUser from "../hooks/useAuthUser";
 
 const FriendsPage = () => {
+  const { authUser } = useAuthUser();
   const [search, setSearch] = useState("");
   const [lookupId, setLookupId] = useState("");
   const [lookupResult, setLookupResult] = useState(null);
@@ -62,9 +64,20 @@ const FriendsPage = () => {
   });
 
   const handleLookup = () => {
-    const trimmed = lookupId.trim();
+    const trimmed = lookupId.trim().toUpperCase();
     if (!trimmed) return toast.error("Enter a user ID");
     findUserById(trimmed);
+  };
+
+  const handleCopyMyUserId = async () => {
+    const myCode = authUser?.userCode;
+    if (!myCode) return toast.error("Set your User ID in Profile first");
+    try {
+      await navigator.clipboard.writeText(myCode);
+      toast.success("Your User ID copied");
+    } catch {
+      toast.error("Could not copy User ID");
+    }
   };
 
   const filterPeople = (people) => people.filter((person) =>
@@ -123,17 +136,32 @@ const FriendsPage = () => {
           <div>
             <h2 className="text-lg font-bold">Add by User ID</h2>
             <p className="text-sm text-base-content/60">
-              Find someone by exact user ID and send a friend request, even outside your organization.
+              Find someone by their 6-character User ID and send a friend request, even outside your organization.
             </p>
           </div>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
+          <div className="rounded-xl border border-base-300/80 bg-base-200/35 px-3 py-2.5 flex items-center justify-between gap-3 min-w-[220px]">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest text-base-content/45 font-semibold">Your User ID</p>
+              <p className="font-mono text-sm text-base-content/80">{authUser?.userCode || "Not set"}</p>
+            </div>
+            <button
+              onClick={handleCopyMyUserId}
+              disabled={!authUser?.userCode}
+              className="btn btn-ghost btn-sm btn-square"
+              title="Copy your User ID"
+            >
+              <CopyIcon className="size-4" />
+            </button>
+          </div>
+
           <input
             type="text"
-            placeholder="Paste user ID..."
+            placeholder="Enter 6-character ID (e.g. A1B2C3)"
             value={lookupId}
-            onChange={(e) => setLookupId(e.target.value)}
+            onChange={(e) => setLookupId(e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase())}
             className="flex-1 rounded-xl border border-base-300/80 bg-base-100/80 px-3 py-2.5 text-sm font-mono outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary/40"
           />
           <button
@@ -157,7 +185,7 @@ const FriendsPage = () => {
 
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-lg truncate">{lookupResult.user.fullName}</p>
-              <p className="text-xs text-base-content/50 font-mono truncate">ID: {lookupResult.user._id}</p>
+              <p className="text-xs text-base-content/50 font-mono truncate">ID: {lookupResult.user.userCode || lookupResult.user._id}</p>
               <div className="flex flex-wrap gap-2 mt-2">
                 <span className={`badge badge-sm ${lookupResult.user.sameOrganization ? "badge-success" : "badge-warning"}`}>
                   {lookupResult.user.sameOrganization ? "Same org" : "External"}

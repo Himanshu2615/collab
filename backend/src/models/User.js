@@ -12,6 +12,16 @@ const userSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    userCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+      uppercase: true,
+      trim: true,
+      minlength: 6,
+      maxlength: 6,
+      match: /^[A-Z0-9]{6}$/,
+    },
     password: {
       type: String,
       required: true,
@@ -62,6 +72,7 @@ const userSchema = new mongoose.Schema(
 );
 
 // Compound indexes for fast org-scoped queries (low-latency)
+userSchema.index({ userCode: 1 }, { unique: true, sparse: true });
 userSchema.index({ organization: 1, isOnboarded: 1 });
 userSchema.index({ organization: 1, _id: 1 });
 
