@@ -208,6 +208,9 @@ const VideoCallModal = ({
   participantProfiles = [],
   callType = 'video',
   conversationId = '',
+  isChannel = false,
+  callerUserId = '',
+  conversationName = '',
 }) => {
   const [client, setClient] = useState(null);
   const [call, setCall] = useState(null);
@@ -261,6 +264,7 @@ const VideoCallModal = ({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const recognitionRef = useRef(null);
   const isTranscribingRef = useRef(false);
+  const shouldCaptureSpeechRef = useRef(false);
   const pendingEntriesRef = useRef([]);
   const transcriptEndRef = useRef(null);
 
@@ -525,7 +529,7 @@ const VideoCallModal = ({
 
   const startTranscription = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR || recognitionRef.current) return;
+    if (!SR || recognitionRef.current || !shouldCaptureSpeechRef.current) return;
 
     isTranscribingRef.current = true;
     setIsTranscribing(true);
@@ -536,6 +540,11 @@ const VideoCallModal = ({
     recognition.lang = 'en-US';
 
     recognition.onresult = (event) => {
+      if (!shouldCaptureSpeechRef.current) {
+        setTranscriptDraft('');
+        return;
+      }
+
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
@@ -565,7 +574,7 @@ const VideoCallModal = ({
     };
 
     recognition.onend = () => {
-      if (isTranscribingRef.current) {
+      if (isTranscribingRef.current && shouldCaptureSpeechRef.current) {
         try { recognition.start(); } catch (_) {}
       }
     };
@@ -595,6 +604,23 @@ const VideoCallModal = ({
       saveTranscriptEntries(callId, entries).catch(() => {});
     }
   };
+
+  useEffect(() => {
+    const shouldTranscribe = Boolean(callRef.current || call) && hasJoinedCallRef.current && isInCallMicEnabled;
+    shouldCaptureSpeechRef.current = shouldTranscribe;
+
+    if (!hasJoinedCallRef.current) return;
+
+    if (shouldTranscribe) {
+      startTranscription();
+      return;
+    }
+
+    if (recognitionRef.current || isTranscribingRef.current) {
+      stopTranscription();
+      flushTranscriptToBackend();
+    }
+  }, [call, isInCallMicEnabled]);
 
   const downloadTranscript = () => {
     if (!transcriptEntries.length) return;
@@ -732,7 +758,7 @@ const VideoCallModal = ({
           data: {
             members: uniqueParticipantIds.map((id) => ({ user_id: id })),
             ...(team ? { team } : {}),
-            custom: { conversationId },
+            custom: { conversationId, isChannel: Boolean(isChannel), conversationName: conversationName || '', callType: callType || 'video' },
           },
         });
       } else {
@@ -777,11 +803,14 @@ const VideoCallModal = ({
       const callLog = {
         callId,
         conversationId,
+        isChannel: Boolean(isChannel),
+        conversationName: conversationName || undefined,
+        hostId: isInitiator ? user._id : (callerUserId || undefined),
         type: callType,
         startTime: new Date().toISOString(),
         participants: Array.from(new Set(participantNames)).filter(Boolean),
         participantIds: Array.from(new Set(participantIds)).filter((id) => id && id !== user._id),
-        participantProfiles: meetingRoster.filter((member) => !member.isYou),
+        participantProfiles: meetingRoster,
         status: 'started',
       };
 
@@ -793,9 +822,9 @@ const VideoCallModal = ({
         joinedAt: new Date().toISOString(),
       });
       hasJoinedCallRef.current = true;
+      shouldCaptureSpeechRef.current = Boolean(isMicEnabled);
 
       toast.success('Connected to call');
-      startTranscription();
     };
 
     try {
@@ -841,15 +870,36 @@ const VideoCallModal = ({
 
   const handleInviteMembersAgain = async (membersToInvite = []) => {
     const activeCall = callRef.current || call;
-    const invitees = membersToInvite.filter((member) => member?.id && !member.isYou);
+    const invitees = membersToInvite.filter((member) => {
+      if (!member?.id || member.isYou) return false;
+      return participantIds.includes(member.id) || participantProfiles.some((profile) => profile?.id === member.id);
+    });
 
     if (!activeCall || invitees.length === 0) return;
 
     try {
-      await activeCall.updateCallMembers({
-        update_members: invitees.map((member) => ({ user_id: member.id })),
-      });
-      await activeCall.ring();
+      const existingMemberIds = new Set(
+        (activeCall.state?.members || []).map((member) => member?.user_id || member?.userId).filter(Boolean)
+      );
+
+      const membersToUpsert = invitees
+        .filter((member) => !existingMemberIds.has(member.id))
+        .map((member) => ({ user_id: member.id }));
+
+      if (membersToUpsert.length > 0) {
+        await activeCall.updateCallMembers({
+          update_members: membersToUpsert,
+        });
+      }
+
+      let usedNotificationFallback = false;
+      try {
+        await activeCall.ring();
+      } catch (ringError) {
+        console.error('Ring members again failed, trying notification fallback:', ringError);
+        await activeCall.notify();
+        usedNotificationFallback = true;
+      }
 
       updateCallLog(callId, {
         lastRangAt: new Date().toISOString(),
@@ -858,16 +908,26 @@ const VideoCallModal = ({
       upsertActiveCall({
         callId,
         conversationId,
+        isChannel: Boolean(isChannel),
+        type: callType,
         participantIds: Array.from(new Set(participantIds)).filter(Boolean),
         participantNames: Array.from(new Set(participantNames)).filter(Boolean),
-        participantProfiles: meetingRoster.filter((member) => !member.isYou),
+        participantProfiles: meetingRoster,
         status: 'ongoing',
       });
 
-      toast.success(invitees.length === 1 ? `Ringing ${invitees[0].name} again` : `Ringing ${invitees.length} members again`);
+      toast.success(
+        invitees.length === 1
+          ? usedNotificationFallback
+            ? `Notified ${invitees[0].name} again`
+            : `Ringing ${invitees[0].name} again`
+          : usedNotificationFallback
+          ? `Notified ${invitees.length} members again`
+          : `Ringing ${invitees.length} members again`
+      );
     } catch (error) {
       console.error('Invite back error:', error);
-      toast.error('Could not ring members again');
+      toast.error(error?.message || 'Could not ring members again');
     }
   };
 
@@ -877,12 +937,16 @@ const VideoCallModal = ({
 
     try {
       if (isInCallMicEnabled) {
+        shouldCaptureSpeechRef.current = false;
+        stopTranscription();
+        flushTranscriptToBackend();
         await activeCall.microphone.disable();
         setIsInCallMicEnabled(false);
       } else {
         await activeCall.microphone.enable();
         if (selectedMicId) await activeCall.microphone.select(selectedMicId);
         setIsInCallMicEnabled(true);
+        shouldCaptureSpeechRef.current = true;
       }
     } catch (error) {
       console.error('Microphone toggle error:', error);
@@ -929,6 +993,7 @@ const VideoCallModal = ({
         upsertActiveCall({
           callId,
           conversationId,
+          isChannel: Boolean(isChannel),
           type: callType,
           participantIds: Array.from(new Set(participantIds)).filter(Boolean),
           participantNames: Array.from(new Set(participantNames)).filter(Boolean),

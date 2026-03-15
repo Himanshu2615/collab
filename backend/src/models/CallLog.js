@@ -18,7 +18,7 @@ const callLogSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["started", "ended", "missed", "rejected"],
+      enum: ["ringing", "started", "ongoing", "left", "ended", "missed", "rejected"],
       default: "started",
     },
     isChannel: {
@@ -50,6 +50,10 @@ const callLogSchema = new mongoose.Schema(
     },
     endTime: {
       type: Date,
+    },
+    conversationName: {
+      type: String,
+      default: '',
     },
   },
   { timestamps: true }

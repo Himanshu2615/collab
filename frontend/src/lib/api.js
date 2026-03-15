@@ -127,7 +127,9 @@ export async function getDashboardSummary() {
 
 /* ── TRANSCRIPTS ── */
 export const saveTranscriptEntries = async (callId, entries) => {
-  const res = await axiosInstance.post(`/transcripts/${callId}/entries`, { entries });
+  // Backend expects `entryId`; local entries use `id` for dedup — map here.
+  const mapped = (entries || []).map((e) => ({ ...e, entryId: e.entryId || e.id }));
+  const res = await axiosInstance.post(`/transcripts/${callId}/entries`, { entries: mapped });
   return res.data;
 };
 

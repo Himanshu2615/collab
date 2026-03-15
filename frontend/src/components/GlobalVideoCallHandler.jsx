@@ -11,6 +11,14 @@ import { removeActiveCall, saveCallLog, updateCallLog, upsertActiveCall } from '
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 
+const inferIsChannelCall = (conversationId, explicitFlag) => {
+  if (typeof explicitFlag === 'boolean') return explicitFlag;
+  const id = String(conversationId || '');
+  if (!id) return false;
+  if (id.includes('!members-')) return false;
+  return id.includes(':');
+};
+
 /**
  * Mounts once at the app level (inside StreamProvider) and listens for
  * incoming call events regardless of which page the user is on.
@@ -31,6 +39,7 @@ const GlobalVideoCallHandler = () => {
   const [callInfo, setCallInfo] = useState(null);
 
   const activeIncomingCallIdRef = useRef(null);
+  const lastRingEventAtRef = useRef({});
   const mutedIncomingCallRef = useRef(null);
   const incomingCallRef = useRef(null);
   const videoClientRef = useRef(null);
@@ -78,14 +87,15 @@ const GlobalVideoCallHandler = () => {
       callId,
       callerName: callerMember?.user?.name || creator?.name || createdBy?.name || event.user?.name || 'Someone',
       callerImage: callerMember?.user?.image || callerMember?.user?.profilePic || creator?.image || createdBy?.image || event.user?.image || '',
-      type: (event.video ?? event.call?.video ?? true) ? 'video' : 'audio',
+      type: event.call?.custom?.callType || ((event.video ?? event.call?.video) ? 'video' : 'audio'),
       conversationId,
       callerUserId,
       participantIds,
       participantNames,
       participantProfiles,
       startedAt: event.created_at || new Date().toISOString(),
-      isChannel: Boolean(event.call?.custom?.isChannel),
+      isChannel: inferIsChannelCall(conversationId, event.call?.custom?.isChannel),
+      conversationName: event.call?.custom?.conversationName || '',
     };
   };
 
@@ -108,8 +118,11 @@ const GlobalVideoCallHandler = () => {
       const nextIncomingCall = buildIncomingCallFromEvent(event);
       if (!nextIncomingCall) return;
 
-      // Deduplicate identical ringing events
-      if (activeIncomingCallIdRef.current === nextIncomingCall.callId) return;
+      // Deduplicate only near-identical bursts; allow re-rings for the same call ID.
+      const now = Date.now();
+      const lastAt = lastRingEventAtRef.current[nextIncomingCall.callId] || 0;
+      if (activeIncomingCallIdRef.current === nextIncomingCall.callId && now - lastAt < 2500) return;
+      lastRingEventAtRef.current[nextIncomingCall.callId] = now;
       activeIncomingCallIdRef.current = nextIncomingCall.callId;
 
       // Respect per-conversation call mute preference
@@ -170,6 +183,7 @@ const GlobalVideoCallHandler = () => {
       if (id && activeIncomingCallIdRef.current === id) {
         setIncomingCall(null);
         activeIncomingCallIdRef.current = null;
+        delete lastRingEventAtRef.current[id];
         mutedIncomingCallRef.current = null;
         removeActiveCall(id);
       }
@@ -195,6 +209,8 @@ const GlobalVideoCallHandler = () => {
             : [loggedCall.callerName],
           participantIds: loggedCall.participantIds || [],
           participantProfiles: loggedCall.participantProfiles || [],
+          hostId: loggedCall.callerUserId || null,
+          conversationName: loggedCall.conversationName || '',
           status: 'missed',
           isChannel: loggedCall.isChannel,
         });
@@ -207,6 +223,7 @@ const GlobalVideoCallHandler = () => {
       if (id && activeIncomingCallIdRef.current === id) {
         logMissedCall(id);
         activeIncomingCallIdRef.current = null;
+        delete lastRingEventAtRef.current[id];
         mutedIncomingCallRef.current = null;
         setIncomingCall(null);
       }
@@ -216,6 +233,7 @@ const GlobalVideoCallHandler = () => {
       const id = event.call?.id || event.call_cid?.split(':')[1];
       if (id && activeIncomingCallIdRef.current === id) {
         activeIncomingCallIdRef.current = null;
+        delete lastRingEventAtRef.current[id];
         mutedIncomingCallRef.current = null;
       }
     });
@@ -230,6 +248,7 @@ const GlobalVideoCallHandler = () => {
       if (id && activeIncomingCallIdRef.current === id) {
         logMissedCall(id);
         activeIncomingCallIdRef.current = null;
+        delete lastRingEventAtRef.current[id];
         mutedIncomingCallRef.current = null;
         setIncomingCall(null);
       }
@@ -253,6 +272,7 @@ const GlobalVideoCallHandler = () => {
     if (!incomingCall) return;
     const accepted = incomingCall;
     activeIncomingCallIdRef.current = null;
+    delete lastRingEventAtRef.current[accepted.callId];
     setIncomingCall(null);
 
     setCallInfo({
@@ -266,6 +286,7 @@ const GlobalVideoCallHandler = () => {
       callType: accepted.type || 'video',
       callerUserId: accepted.callerUserId,
       isChannel: accepted.isChannel,
+      conversationName: accepted.conversationName || '',
     });
     setShowVideoCall(true);
 
@@ -281,6 +302,7 @@ const GlobalVideoCallHandler = () => {
     if (!incomingCall) return;
     const declined = incomingCall;
     activeIncomingCallIdRef.current = null;
+    delete lastRingEventAtRef.current[declined.callId];
     setIncomingCall(null);
 
     try {
@@ -302,6 +324,8 @@ const GlobalVideoCallHandler = () => {
         : [declined.callerName],
       participantIds: declined.participantIds || [],
       participantProfiles: declined.participantProfiles || [],
+      hostId: declined.callerUserId || null,
+      conversationName: declined.conversationName || '',
       status: 'missed',
       isChannel: declined.isChannel,
     });
@@ -344,6 +368,7 @@ const GlobalVideoCallHandler = () => {
           conversationId={callInfo.conversationId}
           callerUserId={callInfo.callerUserId}
           isChannel={callInfo.isChannel}
+          conversationName={callInfo.conversationName || ''}
         />
       )}
     </>

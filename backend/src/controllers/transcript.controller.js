@@ -3,6 +3,245 @@ import cloudinary from "../lib/cloudinary.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import axios from "axios";
 
+const SUMMARY_FALLBACK_PREFIX = "Summary (fallback)";
+
+const sanitizeTranscriptText = (text) =>
+  String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !/^Transcript for Call:/i.test(line))
+    .join("\n");
+
+const buildTranscriptTextFromEntries = (entries = []) =>
+  [...entries]
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+    .map((entry) => `${entry.speakerName}: ${entry.text}`)
+    .join("\n");
+
+const splitTranscriptIntoChunks = (transcriptText, maxChars = 12000) => {
+  const lines = sanitizeTranscriptText(transcriptText).split("\n").filter(Boolean);
+  const chunks = [];
+  let currentChunk = [];
+  let currentLength = 0;
+
+  for (const line of lines) {
+    const nextLength = currentLength + line.length + 1;
+    if (currentChunk.length > 0 && nextLength > maxChars) {
+      chunks.push(currentChunk.join("\n"));
+      currentChunk = [line];
+      currentLength = line.length;
+      continue;
+    }
+
+    currentChunk.push(line);
+    currentLength = nextLength;
+  }
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk.join("\n"));
+  }
+
+  return chunks.filter(Boolean);
+};
+
+const extractGeminiText = (result) => {
+  const direct = result?.response?.text?.();
+  if (typeof direct === "string" && direct.trim()) {
+    return direct.trim();
+  }
+
+  const parts = result?.response?.candidates?.[0]?.content?.parts || [];
+  return parts
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("\n")
+    .trim();
+};
+
+const generateChunkPrompt = (chunkText, chunkIndex, totalChunks) => `You are summarizing chunk ${chunkIndex} of ${totalChunks} from a meeting transcript.
+Return concise notes with these exact sections:
+- Key topics
+- Decisions
+- Action items
+- Risks / blockers
+- Open questions
+
+Rules:
+- Use only facts explicitly stated in the transcript.
+- Merge duplicate points.
+- Keep bullets short and concrete.
+- If a section has no information, write "- None noted".
+
+Transcript chunk:
+${chunkText}`;
+
+const generateFinalSummaryPrompt = (combinedNotes) => `You are an expert meeting assistant.
+Using the chunk notes below, produce a clean final summary in plain text with these exact sections:
+
+Executive Summary
+Write 2-4 sentences summarizing the meeting outcome.
+
+Key Topics
+- bullet list
+
+Decisions
+- bullet list
+
+Action Items
+- Owner - task - due date if stated
+
+Risks / Blockers
+- bullet list
+
+Open Questions
+- bullet list
+
+Rules:
+- Use only information present in the notes.
+- De-duplicate repeated items.
+- Prefer concrete statements over generic wording.
+- If a section has no content, write "- None noted".
+
+Chunk notes:
+${combinedNotes}`;
+
+const generateSinglePassSummaryPrompt = (transcriptText) => `You are an expert meeting assistant.
+Read this transcript and produce a high-quality plain-text summary with these exact sections:
+
+Executive Summary
+Write 2-4 sentences summarizing the purpose, discussion, and outcome.
+
+Key Topics
+- bullet list of the main topics discussed
+
+Decisions
+- bullet list of decisions that were actually made
+
+Action Items
+- Owner - task - due date if stated
+
+Risks / Blockers
+- bullet list
+
+Open Questions
+- bullet list
+
+Rules:
+- Use only facts explicitly stated in the transcript.
+- Do not invent owners, deadlines, or decisions.
+- Merge duplicates and remove filler.
+- Prefer concise, specific wording.
+- If a section has no information, write "- None noted".
+
+Transcript:
+${transcriptText}`;
+
+const generateAiSummary = async ({ apiKey, modelName, transcriptText }) => {
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: modelName });
+  const chunks = splitTranscriptIntoChunks(transcriptText);
+
+  if (chunks.length <= 1) {
+    const result = await model.generateContent(generateSinglePassSummaryPrompt(chunks[0] || transcriptText));
+    return extractGeminiText(result);
+  }
+
+  const chunkSummaries = [];
+  for (let index = 0; index < chunks.length; index += 1) {
+    const result = await model.generateContent(generateChunkPrompt(chunks[index], index + 1, chunks.length));
+    const chunkSummary = extractGeminiText(result);
+    if (chunkSummary) {
+      chunkSummaries.push(`Chunk ${index + 1}\n${chunkSummary}`);
+    }
+  }
+
+  const finalResult = await model.generateContent(generateFinalSummaryPrompt(chunkSummaries.join("\n\n")));
+  return extractGeminiText(finalResult);
+};
+
+const buildFallbackSummary = (transcriptText) => {
+  const lines = sanitizeTranscriptText(transcriptText)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const speakerCounts = new Map();
+  const statements = [];
+
+  for (const line of lines) {
+    const match = line.match(/^(?:\[[^\]]+\]\s*)?([^:]{1,80}):\s*(.+)$/);
+    if (!match) continue;
+    const speaker = match[1].trim();
+    const text = match[2].trim();
+    if (!text) continue;
+    speakerCounts.set(speaker, (speakerCounts.get(speaker) || 0) + 1);
+    statements.push({ speaker, text });
+  }
+
+  const topSpeakers = Array.from(speakerCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([name, count]) => `${name} (${count} turns)`);
+
+  const decisions = statements
+    .filter((s) => /\b(decide|decision|agreed|approved|finalized|confirmed|we will)\b/i.test(s.text))
+    .slice(0, 5)
+    .map((s) => `- ${s.speaker}: ${s.text}`);
+
+  const actions = statements
+    .filter((s) => /\b(action item|todo|follow up|next step|need to|will do|owner|deadline|due)\b/i.test(s.text))
+    .slice(0, 5)
+    .map((s) => `- ${s.speaker}: ${s.text}`);
+
+  const blockers = statements
+    .filter((s) => /\b(blocker|risk|issue|problem|concern|stuck|waiting on|dependency)\b/i.test(s.text))
+    .slice(0, 5)
+    .map((s) => `- ${s.speaker}: ${s.text}`);
+
+  const openQuestions = statements
+    .filter((s) => /\?|\b(question|unclear|not sure|need to confirm|need clarity)\b/i.test(s.text))
+    .slice(0, 5)
+    .map((s) => `- ${s.speaker}: ${s.text}`);
+
+  const highlights = statements
+    .filter((s) => s.text.length >= 24)
+    .slice(0, 6)
+    .map((s) => `- ${s.speaker}: ${s.text}`);
+
+  const executiveSummary = [
+    `This meeting captured ${statements.length || 0} transcript statements across ${speakerCounts.size || 0} participant${speakerCounts.size === 1 ? "" : "s"}.`,
+    decisions.length > 0
+      ? `At least ${decisions.length} decision${decisions.length === 1 ? " was" : "s were"} identified.`
+      : "No explicit decisions were clearly identified.",
+    actions.length > 0
+      ? `There ${actions.length === 1 ? "was 1 clear action item" : `were ${actions.length} clear action items`} mentioned.`
+      : "No clear action items were explicitly stated.",
+  ].join(" ");
+
+  return [
+    SUMMARY_FALLBACK_PREFIX,
+    "",
+    "Executive Summary",
+    executiveSummary,
+    "",
+    "Key Topics",
+    ...(highlights.length ? highlights : ["- None noted"]),
+    "",
+    "Decisions",
+    ...(decisions.length ? decisions : ["- None noted"]),
+    "",
+    "Action Items",
+    ...(actions.length ? actions : ["- None noted"]),
+    "",
+    "Risks / Blockers",
+    ...(blockers.length ? blockers : ["- None noted"]),
+    "",
+    "Open Questions",
+    ...(openQuestions.length ? openQuestions : ["- None noted"]),
+    "",
+    `Participants observed: ${topSpeakers.length ? topSpeakers.join(", ") : "Unknown"}`,
+  ].join("\n");
+};
+
 /**
  * POST /api/transcripts/:callId/entries
  * Each participant pushes their own speech segments.
@@ -154,59 +393,82 @@ export const getTranscriptSummary = async (req, res) => {
       return res.status(404).json({ message: "Transcript not found" });
     }
 
-    // Return cached summary if available
-    if (transcript.summary) {
+    const isFallbackSummary = typeof transcript.summary === "string" && transcript.summary.startsWith(SUMMARY_FALLBACK_PREFIX);
+
+    // Return cached AI summary if available. Allow fallback summaries to be regenerated.
+    if (transcript.summary && !isFallbackSummary) {
       return res.json({ summary: transcript.summary });
     }
 
     // Check if we have the transcript text
     let transcriptText = "";
 
-    // Prefer Cloudinary URL if available
-    if (transcript.cloudinaryUrl) {
+    // Prefer structured entries for better summary quality.
+    if (transcript.entries && transcript.entries.length > 0) {
+      transcriptText = buildTranscriptTextFromEntries(transcript.entries);
+    } else if (transcript.cloudinaryUrl) {
       try {
         // Fetch raw text from Cloudinary
         const rawUrl = transcript.cloudinaryUrl.replace('/upload/fl_attachment/', '/upload/');
         const response = await axios.get(rawUrl);
-        transcriptText = response.data;
+        transcriptText = sanitizeTranscriptText(response.data);
       } catch (err) {
         console.error("Error fetching transcript from Cloudinary for summary:", err);
-        // Fallback to entries if available
-        if (transcript.entries && transcript.entries.length > 0) {
-          transcript.entries.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-          transcriptText = transcript.entries.map(e => `${e.speakerName}: ${e.text}`).join("\n");
-        } else {
-          return res.status(500).json({ message: "Failed to fetch transcript content" });
-        }
+        return res.status(500).json({ message: "Failed to fetch transcript content" });
       }
-    } else if (transcript.entries && transcript.entries.length > 0) {
-      // Use entries directly
-      transcript.entries.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-      transcriptText = transcript.entries.map(e => `${e.speakerName}: ${e.text}`).join("\n");
     } else {
       return res.status(404).json({ message: "No transcript content available to summarize" });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({ message: "AI Summary is not configured (missing API key)" });
+    const configuredModel = (process.env.GEMINI_MODEL || "").trim();
+
+    // Keep prompt within practical limits to avoid model input/token errors on long calls.
+    const MAX_TRANSCRIPT_CHARS = 25000;
+    const safeTranscriptText =
+      transcriptText.length > MAX_TRANSCRIPT_CHARS
+        ? `${transcriptText.slice(0, MAX_TRANSCRIPT_CHARS)}\n\n[Transcript truncated for summary length limits]`
+        : transcriptText;
+
+    const prompt = `You are an AI meeting assistant. Read the transcript and produce a concise summary with these sections:\n1) Key topics\n2) Decisions\n3) Action items (owner + task + deadline if stated)\n4) Risks or blockers\n\nIf a section has no information, write "None noted".\n\nTranscript:\n${safeTranscriptText}`;
+
+    let summaryText = "";
+    let warning = "";
+
+    if (!process.env.GEMINI_API_KEY || !configuredModel) {
+      summaryText = buildFallbackSummary(safeTranscriptText);
+      warning = "AI summary is not fully configured. Returned fallback summary.";
+    } else {
+      try {
+        summaryText = await generateAiSummary({
+          apiKey: process.env.GEMINI_API_KEY,
+          modelName: configuredModel,
+          transcriptText: safeTranscriptText,
+        });
+
+        if (!summaryText) {
+          throw new Error(`No summary text was returned by Gemini model: ${configuredModel}`);
+        }
+      } catch (geminiError) {
+        const status = geminiError?.status || geminiError?.response?.status;
+        console.error("Gemini summary failed, using fallback summary:", geminiError?.message || geminiError);
+        summaryText = buildFallbackSummary(safeTranscriptText);
+        warning = status === 429
+          ? "Gemini quota exceeded. Returned fallback summary."
+          : "Gemini summary failed. Returned fallback summary.";
+      }
     }
 
-    // Generate summary using Gemini 3.1 Flash Lite
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
+    // Cache AI summaries. Keep fallback summaries uncached so a future request can retry Gemini.
+    if (!warning) {
+      transcript.summary = summaryText;
+      await transcript.save();
+    }
 
-    const prompt = `You are an AI meeting assistant. Please read the following meeting transcript and provide a concise, readable summary. Include bullet points for key topics discussed, decisions made, and action items if any.\n\nTranscript:\n${transcriptText}`;
-
-    const result = await model.generateContent(prompt);
-    const summaryText = result.response.text();
-
-    // Cache the summary in the database
-    transcript.summary = summaryText;
-    await transcript.save();
-
-    res.json({ summary: summaryText });
+    res.json({ summary: summaryText, ...(warning ? { warning } : {}) });
   } catch (error) {
     console.error("Error generating summary:", error);
-    res.status(500).json({ message: "Failed to generate meeting summary" });
+    res.status(500).json({
+      message: error?.message || "Failed to generate meeting summary",
+    });
   }
 };

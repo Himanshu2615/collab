@@ -28,7 +28,8 @@ const getHostProfile = (log, authUser) => {
 
   // Fallback to the first available participant if host isn't declared
   if (Array.isArray(log?.participantProfiles) && log.participantProfiles.length > 0) {
-    return log.participantProfiles[0];
+    const nonSelf = log.participantProfiles.find(p => p.id !== authUser?._id);
+    return nonSelf || log.participantProfiles[0];
   }
 
   const [name] = log?.participants || [];
@@ -40,17 +41,56 @@ const getHostProfile = (log, authUser) => {
 };
 
 const getChannelName = (log) => {
-  if (log.isChannel && log.conversationId) {
-    const parts = log.conversationId.split("-");
-    const last = parts[parts.length - 1];
-    return last.charAt(0).toUpperCase() + last.slice(1);
+  // 1. Prefer the stored human-readable name (always accurate)
+  if (log?.conversationName) return log.conversationName;
+
+  if (!log?.conversationId) return null;
+
+  const rawId = String(log.conversationId);
+
+  // 2. Stream channel IDs look like `org-slug-channelname`.
+  //    Take the last hyphen segment, but skip pure timestamps (all digits).
+  const partsByDash = rawId.split("-").filter(Boolean);
+  for (let i = partsByDash.length - 1; i >= 0; i--) {
+    const part = partsByDash[i];
+    if (/^\d+$/.test(part)) continue; // skip timestamp-like segments
+    if (/^[0-9a-f]{20,}$/i.test(part)) continue; // skip ObjectId-like segments
+    return part.charAt(0).toUpperCase() + part.slice(1);
   }
+
   return null;
 };
 
-const getDisplayName = (log) => {
+const resolveIsChannelCall = (log) => {
+  if (typeof log?.isChannel === "boolean") return log.isChannel;
+
+  const conversationId = String(log?.conversationId || "");
+  if (!conversationId) return false;
+
+  if (conversationId.includes("!members-")) return false;
+  if (conversationId.includes(":")) return true;
+
+  // If there are several non-self participants, this is most likely a channel call.
+  if (Array.isArray(log?.participantIds) && log.participantIds.length > 2) return true;
+  if (Array.isArray(log?.participantProfiles) && log.participantProfiles.length > 2) return true;
+
+  return false;
+};
+
+const getDisplayName = (log, authUser) => {
+  const isChannelCall = resolveIsChannelCall(log);
+  if (isChannelCall) {
+    const channelName = getChannelName(log);
+    return channelName ? `#${channelName}` : "Channel Meeting";
+  }
+  // For personal calls show the other party's name, not all participants
+  const otherParticipants = (log.participantProfiles || [])
+    .filter((p) => p && p.id !== authUser?._id)
+    .map((p) => p.name)
+    .filter(Boolean);
+  if (otherParticipants.length > 0) return otherParticipants.join(", ");
   if (log.participants?.length > 0) return log.participants.join(", ");
-  return log.isChannel ? "Channel Meeting" : "Personal Call";
+  return "Personal Call";
 };
 
 const MeetingRecordsPage = () => {
@@ -130,7 +170,7 @@ const MeetingRecordsPage = () => {
       if (error?.response?.status === 404) {
         toast.error("No transcript available to summarize.");
       } else {
-        toast.error("Failed to generate summary.");
+        toast.error(error?.response?.data?.message || "Failed to generate summary.");
       }
       setExpandedSummaryId(null);
     } finally {
@@ -168,6 +208,7 @@ const MeetingRecordsPage = () => {
             const date = new Date(log.startTime || log.createdAt || log.updatedAt || new Date());
             const hostProfile = getHostProfile(log, authUser);
             const profiles = log.participantProfiles || [];
+            const isChannelCall = resolveIsChannelCall(log);
             
             return (
               <div key={log.callId} className="flex flex-col gap-2">
@@ -186,7 +227,7 @@ const MeetingRecordsPage = () => {
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
                       {log.type === 'video' ? <Video className="size-4 text-primary" /> : <Phone className="size-4 text-success" />}
                       <h3 className="text-lg font-bold text-base-content truncate">
-                        {getDisplayName(log)}
+                        {getDisplayName(log, authUser)}
                       </h3>
                       
                       {/* Status/Direction Tags */}
@@ -199,9 +240,9 @@ const MeetingRecordsPage = () => {
                           <span className="badge badge-success badge-sm font-bold gap-1 px-2">Incoming</span>
                         )}
                         
-                        {log.isChannel ? (
+                        {isChannelCall ? (
                           <span className="badge badge-outline badge-sm border-primary/30 text-primary font-bold px-2">
-                            #{getChannelName(log)}
+                            {`#${getChannelName(log) || "channel"}`}
                           </span>
                         ) : (
                           <span className="badge badge-outline badge-sm border-base-content/20 text-base-content/60 font-medium px-2">Personal</span>
@@ -244,8 +285,9 @@ const MeetingRecordsPage = () => {
                     <div className="flex gap-2 w-full sm:w-auto">
                       <button 
                         onClick={() => handleToggleSummary(log)}
-                        disabled={!log.endTime || isSummarizing[log.callId]}
+                        disabled={log.status === 'ringing' || log.status === 'started' || isSummarizing[log.callId]}
                         className={`btn btn-sm flex-1 sm:flex-none btn-outline ${expandedSummaryId === log.callId ? 'bg-primary/10 text-primary border-primary/30' : 'border-base-300 hover:bg-primary/10 hover:text-primary hover:border-primary/30'}`}
+                        title={log.status === 'ringing' || log.status === 'started' ? 'Call must finish before summary is available' : ''}
                       >
                         {isSummarizing[log.callId] ? (
                           <span className="loading loading-spinner w-3.5 h-3.5" />
@@ -257,8 +299,9 @@ const MeetingRecordsPage = () => {
                       </button>
                       <button 
                         onClick={() => handleDownloadTranscript(log)}
-                        disabled={isDownloading || !log.endTime}
+                        disabled={isDownloading || log.status === 'ringing' || log.status === 'started'}
                         className="btn btn-sm flex-1 sm:flex-none btn-outline border-base-300 hover:bg-primary/10 hover:text-primary hover:border-primary/30"
+                        title={log.status === 'ringing' || log.status === 'started' ? 'Call must finish before transcript is available' : ''}
                       >
                         <Download className="size-3.5" />
                         Transcript
