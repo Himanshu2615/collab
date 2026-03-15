@@ -90,6 +90,7 @@ export const StreamProvider = ({ children }) => {
 
   /* dmMeta: { [partnerUserId]: { unread, lastMsg, lastMsgAt, lastMsgSenderId, channelId, partnerName, partnerImage } } */
   const [dmMeta, setDmMeta] = useState({});
+  const [channelMeta, setChannelMeta] = useState({});
   const [presenceById, setPresenceById] = useState({});
   const cleanupRef = useRef(null);
   /* Keep stable refs for use inside event callbacks */
@@ -106,6 +107,9 @@ export const StreamProvider = ({ children }) => {
 
   const dmMetaRef = useRef(dmMeta);
   useEffect(() => { dmMetaRef.current = dmMeta; }, [dmMeta]);
+
+  const channelMetaRef = useRef(channelMeta);
+  useEffect(() => { channelMetaRef.current = channelMeta; }, [channelMeta]);
 
   const upsertPresenceUsers = useCallback((users = []) => {
     if (!Array.isArray(users) || users.length === 0) return;
@@ -554,6 +558,35 @@ export const StreamProvider = ({ children }) => {
         client.on("notification.mark_read", onMarkRead);
         client.on("notification.mark_unread", onMarkUnread);
 
+        /* ── team (org) channel unread tracking ── */
+        const onTeamMessageNew = (event) => {
+          if (event.channel_type !== "team") return;
+          if (event.user?.id === selfIdRef.current) return;
+          const isActive = window.location.pathname.includes(event.channel_id);
+          setChannelMeta((prev) => ({
+            ...prev,
+            [event.channel_id]: {
+              ...(prev[event.channel_id] || {}),
+              unread: isActive ? 0 : (prev[event.channel_id]?.unread ?? 0) + 1,
+              lastMsg: msgPreview(event.message),
+              lastMsgAt: event.message?.created_at || new Date().toISOString(),
+            },
+          }));
+        };
+
+        const onTeamChannelRead = (event) => {
+          if (event.channel_type !== "team") return;
+          if (event.user?.id !== selfIdRef.current) return;
+          setChannelMeta((prev) => ({
+            ...prev,
+            [event.channel_id]: { ...(prev[event.channel_id] || {}), unread: 0 },
+          }));
+        };
+
+        client.on("message.new", onTeamMessageNew);
+        client.on("message.read", onTeamChannelRead);
+        client.on("notification.mark_read", onTeamChannelRead);
+
         const onPresenceChanged = (event) => {
           const changedUser = event.user || event.me || event.member?.user;
           if (changedUser) upsertPresenceUsers([changedUser]);
@@ -613,6 +646,31 @@ export const StreamProvider = ({ children }) => {
           } catch (qErr) {
             console.warn("[StreamContext] queryChannels failed:", qErr);
           }
+
+          // Seed unread for org (team) channels
+          try {
+            const teamChannels = await client.queryChannels(
+              { type: "team", members: { $in: [authUser._id] } },
+              [{ last_message_at: -1 }],
+              { watch: true, state: true, limit: 20, message_limit: 1 }
+            );
+            if (isMounted) {
+              const chMeta = {};
+              for (const ch of teamChannels) {
+                const last = typeof ch.lastMessage === "function"
+                  ? ch.lastMessage()
+                  : ch.state.messages?.[ch.state.messages.length - 1];
+                chMeta[ch.id] = {
+                  unread: ch.countUnread() || 0,
+                  lastMsg: msgPreview(last),
+                  lastMsgAt: last?.created_at || ch.data?.last_message_at || null,
+                };
+              }
+              setChannelMeta(chMeta);
+            }
+          } catch (chErr) {
+            console.warn("[StreamContext] team queryChannels failed:", chErr);
+          }
         };
 
         if (typeof window.requestIdleCallback === "function") {
@@ -641,6 +699,9 @@ export const StreamProvider = ({ children }) => {
           client.off("message.read", onMarkRead);
           client.off("notification.mark_read", onMarkRead);
           client.off("notification.mark_unread", onMarkUnread);
+                    client.off("message.new", onTeamMessageNew);
+                    client.off("message.read", onTeamChannelRead);
+                    client.off("notification.mark_read", onTeamChannelRead);
           client.off("user.presence.changed", onPresenceChanged);
           client.off("user.updated", onUserUpdated);
           client.off("typing.start", onUserActive);
@@ -694,8 +755,26 @@ export const StreamProvider = ({ children }) => {
     }
   }, []);
 
+  const markOrgChannelAsRead = useCallback(async (channelId) => {
+    if (!channelId) return;
+    setChannelMeta((prev) => ({
+      ...prev,
+      [channelId]: { ...(prev[channelId] || {}), unread: 0 },
+    }));
+    try {
+      const StreamChat = await getStreamChatClass();
+      const client = StreamChat.getInstance(STREAM_API_KEY);
+      if (!client?.userID) return;
+      const cid = `team:${channelId}`;
+      const ch = client.activeChannels?.[cid] || client.channel("team", channelId);
+      await ch.markRead();
+    } catch (err) {
+      console.warn("[StreamContext] Failed to mark team channel as read:", err);
+    }
+  }, []);
+
   return (
-    <StreamContext.Provider value={{ dmMeta, presenceById, getUserPresence, refreshUserPresence, markAsRead, notifPermission, requestNotifPermission, notificationPrefs, getConversationPrefs, isConversationMuted, isMessageMuted, isCallMuted, isMessageMutedLive, isCallMutedLive, toggleConversationMute, toggleNotificationMute, updateConversationCallSetting }}>
+    <StreamContext.Provider value={{ dmMeta, channelMeta, presenceById, getUserPresence, refreshUserPresence, markAsRead, markOrgChannelAsRead, notifPermission, requestNotifPermission, notificationPrefs, getConversationPrefs, isConversationMuted, isMessageMuted, isCallMuted, isMessageMutedLive, isCallMutedLive, toggleConversationMute, toggleNotificationMute, updateConversationCallSetting }}>
       {children}
     </StreamContext.Provider>
   );
@@ -704,10 +783,12 @@ export const StreamProvider = ({ children }) => {
 export const useStreamContext = () =>
   useContext(StreamContext) ?? {
     dmMeta: {},
+      channelMeta: {},
     presenceById: {},
     getUserPresence: (_, fallbackUser = null) => fallbackUser,
     refreshUserPresence: async () => [],
     markAsRead: () => { },
+      markOrgChannelAsRead: async () => { },
     notifPermission: "unsupported",
     requestNotifPermission: async () => { },
     notificationPrefs: {},

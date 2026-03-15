@@ -12,7 +12,7 @@ const Layout = ({ children, showSidebar = false }) => {
         {showSidebar && <Sidebar />}
 
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          {!isChatPage && <Navbar />}
+          <Navbar />
 
           <main className={`flex-1 ${isChatPage ? "overflow-hidden" : "overflow-y-auto"}`}>
             {children}

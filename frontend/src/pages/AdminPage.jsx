@@ -61,6 +61,13 @@ const AdminPage = () => {
   const members = membersData?.members || [];
   const isAdminOrOwner = ["admin", "owner"].includes(authUser?.role);
   const isPrivateChannel = newChannel.memberIds.length > 0;
+  const previewLogo = logoChanged ? orgForm.logo : org?.logo;
+  const stats = [
+    { label: "Members", value: members.length, icon: UsersIcon, tone: "primary" },
+    { label: "Channels", value: org?.channels?.length || 0, icon: HashIcon, tone: "secondary" },
+    { label: "Your Role", value: authUser?.role || "member", icon: ShieldCheckIcon, tone: "success" },
+    { label: "Workspace", value: `@${org?.slug || "-"}`, icon: Building2, tone: "warning" },
+  ];
 
   useEffect(() => {
     if (!org) return;
@@ -190,383 +197,414 @@ const AdminPage = () => {
   }
 
   return (
-    <div className="p-4 sm:p-8 max-w-5xl mx-auto min-h-screen">
-      {/* HEADER */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-3">
-          <ShieldCheckIcon className="size-8 text-primary" />
-          Admin Panel
-        </h1>
-        <p className="text-base-content/60 mt-1">Manage <span className="font-semibold text-base-content">{org.name}</span></p>
-      </div>
-
-      {/* STATS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {[
-          { label: "Members", value: members.length, icon: UsersIcon, color: "text-primary" },
-          { label: "Channels", value: org.channels?.length, icon: HashIcon, color: "text-secondary" },
-          { label: "Role", value: authUser?.role, icon: ShieldCheckIcon, color: "text-success" },
-          { label: "Slug", value: `@${org.slug}`, icon: Building2, color: "text-warning" },
-
-        ].map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="stat bg-base-200 rounded-2xl border border-base-300">
-            <div className={`stat-figure ${color}`}><Icon className="size-6" /></div>
-            <div className="stat-title text-xs">{label}</div>
-            <div className={`stat-value text-xl capitalize ${color}`}>{value ?? "—"}</div>
+    <div className="admin-page min-h-full p-3 sm:p-6 lg:p-8">
+      <div className="admin-page__shell mx-auto max-w-7xl">
+        <section className="admin-headerbar mb-6">
+          <div>
+            <p className="admin-headerbar__eyebrow">Workspace Administration</p>
+            <h1 className="admin-headerbar__title">Admin Panel</h1>
+            <p className="admin-headerbar__subtitle">
+              Manage {org.name} with a cleaner overview of identity, invites, channels, and membership.
+            </p>
           </div>
-        ))}
-      </div>
+          <div className="admin-headerbar__meta">
+            <span className="admin-badge">@{org.slug}</span>
+            <span className="admin-pill capitalize">{authUser?.role || "member"}</span>
+          </div>
+        </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {isAdminOrOwner && (
-          <form onSubmit={handleSaveOrgSettings} className="card bg-base-200 border border-base-300 p-6 lg:col-span-2">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <Building2 className="size-5 text-primary" />
-                  <h3 className="text-lg font-bold">Organization Profile</h3>
+        {!isAdminOrOwner && (
+          <div className="admin-surface mb-6 px-5 py-4 text-sm text-base-content/65">
+            You can review workspace channels and members here, but only admins and owners can update organization settings.
+          </div>
+        )}
+
+        <div className="admin-layout">
+          <aside className="admin-sidebar-stack">
+            <section className="admin-overview-card">
+              <div className="admin-overview-card__top">
+                <div className="admin-overview-card__logo">
+                  <Avatar
+                    src={org.logo}
+                    name={org.name}
+                    size="w-16 h-16"
+                    rounded="rounded-[22px]"
+                  />
                 </div>
-                <p className="text-sm text-base-content/60 max-w-2xl">
-                  Customize how your workspace appears with a logo, description, and website.
-                </p>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-lg font-semibold text-base-content">{org.name}</p>
+                  <p className="mt-1 text-sm text-base-content/55">
+                    {org.description?.trim() || "Set up identity, channels, and workspace access for your team."}
+                  </p>
+                </div>
               </div>
 
-              <button type="submit" disabled={saveOrgPending} className="btn btn-primary gap-2 self-start">
-                {saveOrgPending ? <LoaderIcon className="size-4 animate-spin" /> : <SaveIcon className="size-4" />}
-                Save changes
-              </button>
-            </div>
-
-            <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
-              <div className="rounded-2xl border border-base-300 bg-base-100 p-5">
-                <p className="text-sm font-semibold mb-4">Workspace logo</p>
-                <div
-                  className="group relative mx-auto flex w-fit cursor-pointer items-center justify-center rounded-[28px] ring-2 ring-base-300 transition-all hover:ring-primary"
-                  onClick={() => logoInputRef.current?.click()}
-                  title="Upload organization logo"
-                >
-                  <Avatar
-                    src={logoChanged ? orgForm.logo : org?.logo}
-                    name={orgForm.name || org?.name}
-                    size="w-28 h-28"
-                    rounded="rounded-[28px]"
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                    <CameraIcon className="size-6 text-white" />
+              <div className="admin-overview-stats">
+                {stats.map(({ label, value, icon: Icon, tone }) => (
+                  <div key={label} className="admin-inline-stat">
+                    <div className={`admin-stat-icon admin-stat-icon--${tone}`}>
+                      <Icon className="size-4" />
+                    </div>
+                    <div>
+                      <p className="admin-stat-label">{label}</p>
+                      <p className="admin-stat-value capitalize">{value ?? "-"}</p>
+                    </div>
                   </div>
+                ))}
+              </div>
+            </section>
+
+            {isAdminOrOwner && (
+              <section className="admin-surface p-5 sm:p-6">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="admin-section-icon">
+                    <KeyRoundIcon className="size-4.5 text-primary" />
+                  </div>
+                  <h3 className="text-lg font-bold">Invite Code</h3>
+                </div>
+                <p className="mb-4 text-sm text-base-content/60">
+                  Share this code to invite new members to your organization.
+                </p>
+                <div className="admin-code-panel mb-4">
+                  <code className="admin-code-value">{org.inviteCode}</code>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={copyInviteCode} className="btn btn-outline flex-1 gap-2">
+                    <CopyIcon className="size-4" /> Copy
+                  </button>
+                  <button
+                    onClick={() => regenCode()}
+                    disabled={regenPending}
+                    className="btn btn-outline btn-warning flex-1 gap-2"
+                    title="Generate a new code (old one will stop working)"
+                  >
+                    {regenPending ? <LoaderIcon className="animate-spin size-4" /> : <RefreshCwIcon className="size-4" />}
+                    New Code
+                  </button>
+                </div>
+                <p className="mt-2 text-center text-xs text-base-content/40">
+                  Regenerating invalidates the old code immediately.
+                </p>
+              </section>
+            )}
+          </aside>
+
+          <div className="admin-main-stack">
+            {isAdminOrOwner && (
+              <form onSubmit={handleSaveOrgSettings} className="admin-surface p-5 sm:p-6">
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="mb-2 flex items-center gap-3">
+                    <div className="admin-section-icon">
+                      <Building2 className="size-4.5 text-primary" />
+                    </div>
+                    <h3 className="text-lg font-bold">Organization Profile</h3>
+                  </div>
+                  <p className="max-w-2xl text-sm text-base-content/60">
+                    Customize how your workspace appears with a logo, description, and website.
+                  </p>
                 </div>
 
-                <input
-                  ref={logoInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleLogoUpload}
-                />
+                <button type="submit" disabled={saveOrgPending} className="btn btn-primary gap-2 self-start shadow-sm">
+                  {saveOrgPending ? <LoaderIcon className="size-4 animate-spin" /> : <SaveIcon className="size-4" />}
+                  Save changes
+                </button>
+              </div>
 
-                <div className="mt-4 space-y-2">
-                  <button
-                    type="button"
+              <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+                <div className="admin-subcard p-5">
+                  <p className="mb-4 text-sm font-semibold">Workspace logo</p>
+                  <div
+                    className="group relative mx-auto flex w-fit cursor-pointer items-center justify-center rounded-[28px] ring-2 ring-base-300 transition-all hover:ring-primary"
                     onClick={() => logoInputRef.current?.click()}
-                    className="btn btn-outline btn-sm w-full gap-2"
+                    title="Upload organization logo"
                   >
-                    <CameraIcon className="size-4" /> Upload logo
-                  </button>
-                  {(logoChanged ? orgForm.logo : org?.logo) && (
+                    <Avatar
+                      src={previewLogo}
+                      name={orgForm.name || org?.name}
+                      size="w-28 h-28"
+                      rounded="rounded-[28px]"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                      <CameraIcon className="size-6 text-white" />
+                    </div>
+                  </div>
+
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleLogoUpload}
+                  />
+
+                  <div className="mt-4 space-y-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setLogoChanged(true);
-                        setOrgField("logo", "");
-                      }}
-                      className="btn btn-ghost btn-sm w-full text-error"
+                      onClick={() => logoInputRef.current?.click()}
+                      className="btn btn-outline btn-sm w-full gap-2"
                     >
-                      Remove logo
+                      <CameraIcon className="size-4" /> Upload logo
                     </button>
-                  )}
-                  <p className="text-xs text-base-content/45 text-center">
-                    PNG, JPG or GIF · max 5 MB
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="form-control sm:col-span-2">
-                  <label className="label pb-1">
-                    <span className="label-text font-medium">Organization name</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={orgForm.name}
-                    onChange={(e) => setOrgField("name", e.target.value)}
-                    className="input input-bordered w-full"
-                    placeholder="Enter organization name"
-                  />
-                </div>
-
-                <div className="form-control sm:col-span-2">
-                  <label className="label pb-1">
-                    <span className="label-text font-medium">Description</span>
-                  </label>
-                  <textarea
-                    value={orgForm.description}
-                    onChange={(e) => setOrgField("description", e.target.value.slice(0, 220))}
-                    className="textarea textarea-bordered min-h-28 resize-none"
-                    placeholder="Tell your team what this workspace is for"
-                  />
-                  <label className="label pt-1">
-                    <span className="label-text-alt text-base-content/40">{orgForm.description.length}/220</span>
-                  </label>
-                </div>
-
-                <div className="form-control sm:col-span-2">
-                  <label className="label pb-1">
-                    <span className="label-text font-medium flex items-center gap-1.5">
-                      <GlobeIcon className="size-3.5" /> Website
-                    </span>
-                  </label>
-                  <input
-                    type="url"
-                    value={orgForm.website}
-                    onChange={(e) => setOrgField("website", e.target.value)}
-                    className="input input-bordered w-full"
-                    placeholder="https://your-company.com"
-                  />
-                </div>
-
-                <div className="sm:col-span-2 rounded-2xl border border-base-300 bg-base-100 px-4 py-3 text-sm text-base-content/60">
-                  <span className="font-semibold text-base-content">Workspace slug:</span> @{org.slug}
-                </div>
-              </div>
-            </div>
-          </form>
-        )}
-
-        {/* INVITE CODE */}
-        {isAdminOrOwner && (
-          <div className="card bg-base-200 border border-base-300 p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <KeyRoundIcon className="size-5 text-primary" />
-              <h3 className="text-lg font-bold">Invite Code</h3>
-            </div>
-            <p className="text-sm text-base-content/60 mb-4">
-              Share this code to invite new members to your organization.
-            </p>
-            <div className="flex items-center gap-3 bg-base-300 rounded-xl p-4 mb-4">
-              <code className="flex-1 text-2xl font-mono font-bold tracking-[0.3em] text-center text-primary">
-                {org.inviteCode}
-              </code>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={copyInviteCode} className="btn btn-outline flex-1 gap-2">
-                <CopyIcon className="size-4" /> Copy
-              </button>
-              <button
-                onClick={() => regenCode()}
-                disabled={regenPending}
-                className="btn btn-outline btn-warning flex-1 gap-2"
-                title="Generate a new code (old one will stop working)"
-              >
-                {regenPending ? <LoaderIcon className="animate-spin size-4" /> : <RefreshCwIcon className="size-4" />}
-                New Code
-              </button>
-            </div>
-            <p className="text-xs text-base-content/40 mt-2 text-center">
-              ⚠️ Regenerating invalidates the old code immediately.
-            </p>
-          </div>
-        )}
-
-        {/* CHANNEL MANAGEMENT */}
-        <div className="card bg-base-200 border border-base-300 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <HashIcon className="size-5 text-secondary" />
-              <h3 className="text-lg font-bold">Channels</h3>
-            </div>
-            {isAdminOrOwner && (
-              <button
-                onClick={() => setShowAddChannel((s) => !s)}
-                className="btn btn-sm btn-outline btn-secondary gap-1"
-              >
-                <PlusIcon className="size-4" /> Add
-              </button>
-            )}
-          </div>
-
-          {/* Add channel form */}
-          {showAddChannel && (
-            <div className="bg-base-300 rounded-xl p-4 mb-4 space-y-3">
-              <input
-                type="text"
-                placeholder="Channel name (e.g., design)"
-                value={newChannel.name}
-                onChange={(e) => setNewChannel((p) => ({ ...p, name: e.target.value }))}
-                className="input input-bordered input-sm w-full"
-              />
-              <input
-                type="text"
-                placeholder="Description (optional)"
-                value={newChannel.description}
-                onChange={(e) => setNewChannel((p) => ({ ...p, description: e.target.value }))}
-                className="input input-bordered input-sm w-full"
-              />
-              <div className="rounded-xl border border-base-content/10 bg-base-100/60 p-3">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div>
-                    <p className="text-sm font-semibold">Channel audience</p>
-                    <p className="text-xs text-base-content/50">
-                      Leave everyone unchecked for a public channel, or pick specific members for a private group.
+                    {previewLogo && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLogoChanged(true);
+                          setOrgField("logo", "");
+                        }}
+                        className="btn btn-ghost btn-sm w-full text-error"
+                      >
+                        Remove logo
+                      </button>
+                    )}
+                    <p className="text-center text-xs text-base-content/45">
+                      PNG, JPG or GIF · max 5 MB
                     </p>
                   </div>
-                  <span className={`badge ${isPrivateChannel ? "badge-secondary" : "badge-success"}`}>
-                    {isPrivateChannel ? "Private" : "Public"}
-                  </span>
                 </div>
 
-                <div className="flex flex-wrap gap-2 mb-3">
-                  <button
-                    type="button"
-                    onClick={() => setNewChannel((p) => ({ ...p, memberIds: [] }))}
-                    className={`btn btn-xs gap-1 ${!isPrivateChannel ? "btn-success" : "btn-outline"}`}
-                  >
-                    <GlobeIcon className="size-3" /> Everyone in workspace
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewChannel((p) => ({
-                      ...p,
-                      memberIds: members.filter((member) => member._id !== authUser?._id).map((member) => member._id),
-                    }))}
-                    className="btn btn-xs btn-outline gap-1"
-                  >
-                    <UserPlusIcon className="size-3" /> Select all members
-                  </button>
-                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="form-control sm:col-span-2">
+                    <label className="label pb-1">
+                      <span className="label-text font-medium">Organization name</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={orgForm.name}
+                      onChange={(e) => setOrgField("name", e.target.value)}
+                      className="admin-input"
+                      placeholder="Enter organization name"
+                    />
+                  </div>
 
-                <div className="max-h-44 overflow-y-auto space-y-2 pr-1">
-                  {members
-                    .filter((member) => member._id !== authUser?._id)
-                    .map((member) => {
-                      const isSelected = newChannel.memberIds.includes(member._id);
-                      return (
-                        <label
-                          key={member._id}
-                          className={`flex items-center gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
-                            isSelected
-                              ? "border-secondary bg-secondary/10"
-                              : "border-base-content/10 hover:bg-base-200"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            className="checkbox checkbox-xs checkbox-secondary"
-                            checked={isSelected}
-                            onChange={() => toggleChannelMember(member._id)}
-                          />
-                          <Avatar
-                            src={member.profilePic}
-                            name={member.fullName}
-                            size="w-8 h-8"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium truncate">{member.fullName}</p>
-                            <p className="text-xs text-base-content/50 capitalize">{member.role || "member"}</p>
-                          </div>
-                        </label>
-                      );
-                    })}
+                  <div className="form-control sm:col-span-2">
+                    <label className="label pb-1">
+                      <span className="label-text font-medium">Description</span>
+                    </label>
+                    <textarea
+                      value={orgForm.description}
+                      onChange={(e) => setOrgField("description", e.target.value.slice(0, 220))}
+                      className="admin-textarea"
+                      placeholder="Tell your team what this workspace is for"
+                    />
+                    <label className="label pt-1">
+                      <span className="label-text-alt text-base-content/40">{orgForm.description.length}/220</span>
+                    </label>
+                  </div>
+
+                  <div className="form-control sm:col-span-2">
+                    <label className="label pb-1">
+                      <span className="label-text font-medium flex items-center gap-1.5">
+                        <GlobeIcon className="size-3.5" /> Website
+                      </span>
+                    </label>
+                    <input
+                      type="url"
+                      value={orgForm.website}
+                      onChange={(e) => setOrgField("website", e.target.value)}
+                      className="admin-input"
+                      placeholder="https://your-company.com"
+                    />
+                  </div>
+
+                  <div className="admin-subcard sm:col-span-2 px-4 py-3 text-sm text-base-content/60">
+                    <span className="font-semibold text-base-content">Workspace slug:</span> @{org.slug}
+                  </div>
                 </div>
-                {isPrivateChannel && (
-                  <p className="text-xs text-base-content/50 mt-3">
-                    Selected members plus you will be added to this private channel.
-                  </p>
-                )}
               </div>
-              <div className="flex gap-2">
+            </form>
+            )}
+
+            <div className="admin-surface p-5 sm:p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="admin-section-icon">
+                  <HashIcon className="size-4.5 text-secondary" />
+                </div>
+                <h3 className="text-lg font-bold">Channels</h3>
+              </div>
+              {isAdminOrOwner && (
                 <button
-                  onClick={() => addChannel(newChannel)}
-                  disabled={addPending || !newChannel.name.trim()}
-                  className="btn btn-sm btn-secondary gap-1"
+                  onClick={() => setShowAddChannel((s) => !s)}
+                  className="btn btn-sm btn-outline btn-secondary gap-1"
                 >
-                  {addPending ? <LoaderIcon className="animate-spin size-3" /> : <PlusIcon className="size-3" />}
-                  Create
+                  <PlusIcon className="size-4" /> Add
                 </button>
-                <button onClick={() => setShowAddChannel(false)} className="btn btn-sm btn-ghost gap-1">
-                  <XIcon className="size-3" /> Cancel
-                </button>
-              </div>
+              )}
             </div>
-          )}
-
-          <div className="space-y-2">
-            {org.channels?.map((ch) => (
-              <div
-                key={ch._id}
-                className="flex items-center gap-3 p-3 bg-base-300 rounded-xl"
-              >
-                {ch.isPrivate ? (
-                  <LockIcon className="size-4 text-secondary flex-shrink-0" />
-                ) : (
-                  <HashIcon className="size-4 text-primary flex-shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium text-sm">{ch.name}</p>
-                    <span className={`badge badge-xs ${ch.isPrivate ? "badge-secondary" : "badge-ghost"}`}>
-                      {ch.isPrivate ? "private" : "public"}
+            {showAddChannel && (
+              <div className="admin-subcard mb-4 space-y-3 p-4">
+                <input
+                  type="text"
+                  placeholder="Channel name (e.g., design)"
+                  value={newChannel.name}
+                  onChange={(e) => setNewChannel((p) => ({ ...p, name: e.target.value }))}
+                  className="admin-input admin-input--sm"
+                />
+                <input
+                  type="text"
+                  placeholder="Description (optional)"
+                  value={newChannel.description}
+                  onChange={(e) => setNewChannel((p) => ({ ...p, description: e.target.value }))}
+                  className="admin-input admin-input--sm"
+                />
+                <div className="rounded-xl border border-base-content/10 bg-base-100/60 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">Channel audience</p>
+                      <p className="text-xs text-base-content/50">
+                        Leave everyone unchecked for a public channel, or pick specific members for a private group.
+                      </p>
+                    </div>
+                    <span className={`badge ${isPrivateChannel ? "badge-secondary" : "badge-success"}`}>
+                      {isPrivateChannel ? "Private" : "Public"}
                     </span>
-                    {ch.isPrivate && (
-                      <span className="badge badge-outline badge-xs">{(ch.members?.length || 0)} members</span>
-                    )}
                   </div>
-                  {ch.description && <p className="text-xs text-base-content/50 truncate">{ch.description}</p>}
-                </div>
-                {ch.isDefault ? (
-                  <span className="badge badge-ghost badge-xs">default</span>
-                ) : (
-                  isAdminOrOwner && (
-                    <button
-                      onClick={() => removeChannel(ch._id)}
-                      className="btn btn-ghost btn-xs btn-circle text-error"
-                      title="Delete channel"
-                    >
-                      <TrashIcon className="size-3" />
-                    </button>
-                  )
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
 
-        {/* MEMBERS LIST */}
-        <div className="card bg-base-200 border border-base-300 p-6 lg:col-span-2">
-          <div className="flex items-center gap-3 mb-4">
-            <UsersIcon className="size-5 text-success" />
-            <h3 className="text-lg font-bold">Members ({members.length})</h3>
-          </div>
-          {membersLoading ? (
-            <div className="flex justify-center py-8">
-              <LoaderIcon className="animate-spin size-6 text-primary" />
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-              {members.map((m) => (
-                <div key={m._id} className="flex items-center gap-3 p-3 bg-base-300 rounded-xl">
-                  <Avatar
-                    src={m.profilePic}
-                    name={m.fullName}
-                    size="w-9 h-9"
-                  />
-                  <div className="min-w-0">
-                    <p className="font-semibold text-sm truncate">{m.fullName}</p>
-                    <p className="text-xs text-base-content/50 capitalize truncate">{m.role || "member"}</p>
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewChannel((p) => ({ ...p, memberIds: [] }))}
+                      className={`btn btn-xs gap-1 ${!isPrivateChannel ? "btn-success" : "btn-outline"}`}
+                    >
+                      <GlobeIcon className="size-3" /> Everyone in workspace
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewChannel((p) => ({
+                        ...p,
+                        memberIds: members.filter((member) => member._id !== authUser?._id).map((member) => member._id),
+                      }))}
+                      className="btn btn-xs btn-outline gap-1"
+                    >
+                      <UserPlusIcon className="size-3" /> Select all members
+                    </button>
                   </div>
+
+                  <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                    {members
+                      .filter((member) => member._id !== authUser?._id)
+                      .map((member) => {
+                        const isSelected = newChannel.memberIds.includes(member._id);
+                        return (
+                          <label
+                            key={member._id}
+                            className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 transition-colors ${
+                              isSelected
+                                ? "border-secondary bg-secondary/10"
+                                : "border-base-content/10 hover:bg-base-200"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="checkbox checkbox-xs checkbox-secondary"
+                              checked={isSelected}
+                              onChange={() => toggleChannelMember(member._id)}
+                            />
+                            <Avatar
+                              src={member.profilePic}
+                              name={member.fullName}
+                              size="w-8 h-8"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium">{member.fullName}</p>
+                              <p className="text-xs capitalize text-base-content/50">{member.role || "member"}</p>
+                            </div>
+                          </label>
+                        );
+                      })}
+                  </div>
+                  {isPrivateChannel && (
+                    <p className="mt-3 text-xs text-base-content/50">
+                      Selected members plus you will be added to this private channel.
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => addChannel(newChannel)}
+                    disabled={addPending || !newChannel.name.trim()}
+                    className="btn btn-sm btn-secondary gap-1"
+                  >
+                    {addPending ? <LoaderIcon className="animate-spin size-3" /> : <PlusIcon className="size-3" />}
+                    Create
+                  </button>
+                  <button onClick={() => setShowAddChannel(false)} className="btn btn-sm btn-ghost gap-1">
+                    <XIcon className="size-3" /> Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {org.channels?.map((ch) => (
+                <div key={ch._id} className="admin-list-row">
+                  {ch.isPrivate ? (
+                    <LockIcon className="size-4 flex-shrink-0 text-secondary" />
+                  ) : (
+                    <HashIcon className="size-4 flex-shrink-0 text-primary" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">{ch.name}</p>
+                      <span className={`badge badge-xs ${ch.isPrivate ? "badge-secondary" : "badge-ghost"}`}>
+                        {ch.isPrivate ? "private" : "public"}
+                      </span>
+                      {ch.isPrivate && (
+                        <span className="badge badge-outline badge-xs">{(ch.members?.length || 0)} members</span>
+                      )}
+                    </div>
+                    {ch.description && <p className="truncate text-xs text-base-content/50">{ch.description}</p>}
+                  </div>
+                  {ch.isDefault ? (
+                    <span className="badge badge-ghost badge-xs">default</span>
+                  ) : (
+                    isAdminOrOwner && (
+                      <button
+                        onClick={() => removeChannel(ch._id)}
+                        className="btn btn-ghost btn-xs btn-circle text-error"
+                        title="Delete channel"
+                      >
+                        <TrashIcon className="size-3" />
+                      </button>
+                    )
+                  )}
                 </div>
               ))}
             </div>
-          )}
+          </div>
+
+          <div className="admin-surface p-5 sm:p-6 xl:col-span-2">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="admin-section-icon">
+                <UsersIcon className="size-4.5 text-success" />
+              </div>
+              <h3 className="text-lg font-bold">Members ({members.length})</h3>
+            </div>
+            {membersLoading ? (
+              <div className="flex justify-center py-8">
+                <LoaderIcon className="size-6 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {members.map((m) => (
+                  <div key={m._id} className="admin-member-row">
+                    <Avatar
+                      src={m.profilePic}
+                      name={m.fullName}
+                      size="w-9 h-9"
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{m.fullName}</p>
+                      <p className="truncate text-xs capitalize text-base-content/50">{m.role || "member"}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          </div>
         </div>
       </div>
     </div>

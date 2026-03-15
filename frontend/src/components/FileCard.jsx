@@ -5,12 +5,12 @@ import Avatar from "./Avatar";
 
 /* ── File type helpers ──────────────────────────── */
 const ICON_MAP = {
-  image:       { icon: Image,           bg: "bg-emerald-50",   color: "text-emerald-500" },
-  document:    { icon: FileText,        bg: "bg-blue-50",      color: "text-blue-500"    },
-  spreadsheet: { icon: FileSpreadsheet, bg: "bg-green-50",     color: "text-green-600"   },
-  code:        { icon: FileCode,        bg: "bg-indigo-50",    color: "text-indigo-500"  },
+  image:       { icon: Image,           bg: "bg-success/10",   color: "text-success"   },
+  document:    { icon: FileText,        bg: "bg-primary/10",   color: "text-primary"   },
+  spreadsheet: { icon: FileSpreadsheet, bg: "bg-success/10",   color: "text-success"   },
+  code:        { icon: FileCode,        bg: "bg-secondary/12", color: "text-secondary" },
 };
-const DEFAULT_ICON = { icon: FileIcon, bg: "bg-gray-50", color: "text-gray-400" };
+const DEFAULT_ICON = { icon: FileIcon, bg: "bg-base-200", color: "text-base-content/45" };
 
 const getIconConfig = (type) => ICON_MAP[type] || DEFAULT_ICON;
 
@@ -87,7 +87,7 @@ const FileCard = ({ file, onSelect, isSelected, viewMode = "grid", onDelete, onD
         onDragEnd={handleDragEnd}
         onClick={() => onSelect(file)}
         className={`group cursor-pointer transition-colors ${
-          isDragging ? "opacity-50" : isSelected ? "bg-blue-50" : "hover:bg-gray-50/70"
+          isDragging ? "opacity-50" : isSelected ? "bg-primary/8" : "hover:bg-base-200/45"
         }`}
       >
         {/* Type icon */}
@@ -99,8 +99,8 @@ const FileCard = ({ file, onSelect, isSelected, viewMode = "grid", onDelete, onD
 
         {/* Name */}
         <td className="px-4 py-3">
-          <p className="font-medium text-gray-900 truncate max-w-[240px]">{file.name}</p>
-          <p className="text-xs text-gray-400 uppercase mt-0.5">{file.type}</p>
+          <p className="font-medium text-base-content truncate max-w-[240px]">{file.name}</p>
+          <p className="text-xs text-base-content/45 uppercase mt-0.5">{file.type}</p>
         </td>
 
         {/* Uploader */}
@@ -108,20 +108,20 @@ const FileCard = ({ file, onSelect, isSelected, viewMode = "grid", onDelete, onD
           {file.sharedBy ? (
             <div className="flex items-center gap-2">
               <Avatar src={file.sharedBy.profilePic} name={file.sharedBy.fullName} size="w-6 h-6" />
-              <span className="text-sm text-gray-700 truncate max-w-[120px]">{file.sharedBy.fullName}</span>
+              <span className="text-sm text-base-content/80 truncate max-w-[120px]">{file.sharedBy.fullName}</span>
             </div>
           ) : (
-            <span className="text-sm text-gray-400">—</span>
+            <span className="text-sm text-base-content/40">—</span>
           )}
         </td>
 
         {/* Size */}
-        <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell whitespace-nowrap">
+        <td className="px-4 py-3 text-sm text-base-content/60 hidden sm:table-cell whitespace-nowrap">
           {formatFileSize(file.size)}
         </td>
 
         {/* Date */}
-        <td className="px-4 py-3 text-sm text-gray-400 hidden lg:table-cell whitespace-nowrap">
+        <td className="px-4 py-3 text-sm text-base-content/45 hidden lg:table-cell whitespace-nowrap">
           {relativeTime(file.createdAt)}
         </td>
 
@@ -131,14 +131,14 @@ const FileCard = ({ file, onSelect, isSelected, viewMode = "grid", onDelete, onD
             <button
               onClick={handleView}
               title="View file"
-              className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
+              className="p-1.5 rounded hover:bg-primary/10 text-base-content/45 hover:text-primary transition-colors"
             >
               <Eye className="size-3.5" />
             </button>
             <button
               onClick={handleDownload}
               title="Download"
-              className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
+              className="p-1.5 rounded hover:bg-primary/10 text-base-content/45 hover:text-primary transition-colors"
             >
               <Download className="size-3.5" />
             </button>
@@ -146,7 +146,7 @@ const FileCard = ({ file, onSelect, isSelected, viewMode = "grid", onDelete, onD
               <button
                 onClick={handleDelete}
                 title="Delete"
-                className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                className="p-1.5 rounded hover:bg-error/10 text-base-content/45 hover:text-error transition-colors"
               >
                 <Trash2 className="size-3.5" />
               </button>
@@ -164,17 +164,17 @@ const FileCard = ({ file, onSelect, isSelected, viewMode = "grid", onDelete, onD
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onClick={() => onSelect(file)}
-      className={`group relative bg-white rounded-xl border transition-all cursor-pointer ${
+      className={`group relative rounded-2xl border bg-base-100/92 shadow-[0_8px_22px_rgba(15,23,42,0.05)] transition-all cursor-pointer ${
         isDragging
           ? "opacity-50 scale-95"
           : isSelected
-          ? "border-blue-400 ring-2 ring-blue-100 shadow-sm"
-          : "border-gray-100 hover:border-gray-200 hover:shadow-md"
+          ? "border-primary/45 ring-2 ring-primary/15 shadow-md"
+          : "border-base-300/75 hover:border-base-300 hover:shadow-lg"
       }`}
     >
       {/* Preview area — overflow-hidden here clips the image to the rounded top corners */}
       <div
-        className="aspect-video w-full rounded-t-xl bg-gray-50 flex items-center justify-center relative overflow-hidden bg-center bg-cover"
+        className="aspect-video w-full rounded-t-2xl bg-base-200/70 flex items-center justify-center relative overflow-hidden bg-center bg-cover"
         style={file.type === "image" ? { backgroundImage: `url(${file.url})` } : {}}
       >
         {file.type !== "image" && (
@@ -184,18 +184,18 @@ const FileCard = ({ file, onSelect, isSelected, viewMode = "grid", onDelete, onD
         )}
 
         {/* Hover action overlay */}
-        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+        <div className="absolute inset-0 bg-base-content/25 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
           <button
             onClick={handleView}
             title="View"
-            className="p-2 bg-white/90 hover:bg-white rounded-lg shadow text-gray-700 transition"
+            className="p-2 rounded-lg shadow bg-base-100/95 hover:bg-base-100 text-base-content transition"
           >
             <Eye className="size-4" />
           </button>
           <button
             onClick={handleDownload}
             title="Download"
-            className="p-2 bg-white/90 hover:bg-white rounded-lg shadow text-gray-700 transition"
+            className="p-2 rounded-lg shadow bg-base-100/95 hover:bg-base-100 text-base-content transition"
           >
             <Download className="size-4" />
           </button>
@@ -206,41 +206,41 @@ const FileCard = ({ file, onSelect, isSelected, viewMode = "grid", onDelete, onD
       <div className="p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="font-medium text-sm text-gray-900 truncate leading-tight">{file.name}</p>
-            <p className="text-[11px] text-gray-400 mt-0.5 uppercase font-medium">
+            <p className="font-medium text-sm text-base-content truncate leading-tight">{file.name}</p>
+            <p className="text-[11px] text-base-content/45 mt-0.5 uppercase font-medium">
               {formatFileSize(file.size)} · {file.type}
             </p>
           </div>
           <div ref={menuRef} className="relative shrink-0">
             <button
               onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v); }}
-              className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600"
+              className="p-1 hover:bg-base-200 rounded text-base-content/45 hover:text-base-content"
             >
               <MoreVertical className="size-3.5" />
             </button>
             {menuOpen && (
               <div
-                className="absolute right-0 top-full mt-1 bg-white border border-gray-100 rounded-xl shadow-lg z-50 py-1 min-w-[130px]"
+                className="absolute right-0 top-full mt-1 bg-base-100 border border-base-300/80 rounded-xl shadow-lg z-50 py-1 min-w-[130px]"
                 onClick={e => e.stopPropagation()}
               >
                 <button
                   onClick={handleView}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-base-content hover:bg-base-200/65 transition"
                 >
                   <Eye className="size-3.5" /> View
                 </button>
                 <button
                   onClick={handleDownload}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-base-content hover:bg-base-200/65 transition"
                 >
                   <Download className="size-3.5" /> Download
                 </button>
                 {onDelete && (
                   <>
-                    <div className="my-1 border-t border-gray-100" />
+                    <div className="my-1 border-t border-base-300/70" />
                     <button
                       onClick={handleDelete}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-error hover:bg-error/10 transition"
                     >
                       <Trash2 className="size-3.5" /> Delete
                     </button>
@@ -253,10 +253,10 @@ const FileCard = ({ file, onSelect, isSelected, viewMode = "grid", onDelete, onD
 
         {/* Uploader */}
         {file.sharedBy && (
-          <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-gray-50">
+          <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-base-300/60">
             <Avatar src={file.sharedBy.profilePic} name={file.sharedBy.fullName} size="w-4 h-4" />
-            <span className="text-[11px] text-gray-400 truncate">{file.sharedBy.fullName}</span>
-            <span className="text-[11px] text-gray-300 ml-auto shrink-0">{relativeTime(file.createdAt)}</span>
+            <span className="text-[11px] text-base-content/45 truncate">{file.sharedBy.fullName}</span>
+            <span className="text-[11px] text-base-content/35 ml-auto shrink-0">{relativeTime(file.createdAt)}</span>
           </div>
         )}
       </div>

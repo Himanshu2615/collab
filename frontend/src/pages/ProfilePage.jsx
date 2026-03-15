@@ -6,7 +6,7 @@ import { setCachedAuthUser } from "../lib/authCache";
 import useAuthUser from "../hooks/useAuthUser";
 import {
     CameraIcon, SaveIcon, LoaderIcon, UserIcon,
-    MapPinIcon, GlobeIcon, FileTextIcon, ArrowLeftIcon,
+    MapPinIcon, GlobeIcon, FileTextIcon, ArrowLeftIcon, CopyIcon,
 } from "lucide-react";
 import { Link } from "react-router";
 import { LANGUAGES } from "../constants";
@@ -75,6 +75,16 @@ const ProfilePage = () => {
         save(payload);
     };
 
+    const handleCopyUserId = async () => {
+        if (!authUser?._id) return;
+        try {
+            await navigator.clipboard.writeText(authUser._id);
+            toast.success("User ID copied");
+        } catch {
+            toast.error("Could not copy User ID");
+        }
+    };
+
     const displayName = form.fullName || authUser?.fullName || "";
 
     return (
@@ -88,6 +98,24 @@ const ProfilePage = () => {
                     <div>
                         <h1 className="text-2xl font-extrabold tracking-tight">Edit Profile</h1>
                         <p className="text-base-content/50 text-sm">Changes are saved immediately</p>
+                    </div>
+                </div>
+
+                <div className="card bg-base-200 border border-base-300 p-5 mb-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-wider text-base-content/45">User ID</p>
+                            <p className="mt-1 break-all font-mono text-sm text-base-content/75">{authUser?._id || "Unavailable"}</p>
+                            <p className="mt-1 text-xs text-base-content/45">Share this ID on Team & Friends so someone can add you directly.</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleCopyUserId}
+                            disabled={!authUser?._id}
+                            className="btn btn-outline btn-sm gap-2 self-start sm:self-center"
+                        >
+                            <CopyIcon className="size-4" /> Copy ID
+                        </button>
                     </div>
                 </div>
 

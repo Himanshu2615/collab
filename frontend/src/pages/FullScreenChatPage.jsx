@@ -37,12 +37,11 @@ import {
   BellOffIcon,
   HashIcon,
   SearchIcon,
-  XIcon,
   UsersIcon,
   MoreVerticalIcon,
 } from "lucide-react";
 
-import SlackMessage from "../components/SlackMessage";
+import PremiumMessage from "../components/PremiumMessage";
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 
@@ -68,7 +67,7 @@ const FullScreenChatPage = () => {
   const [showCallLogs, setShowCallLogs] = useState(false);
 
   const { authUser } = useAuthUser();
-  const { markAsRead, isMessageMuted, isCallMuted, getUserPresence, refreshUserPresence } = useStreamContext();
+  const { markAsRead, markOrgChannelAsRead, isMessageMuted, isCallMuted, getUserPresence, refreshUserPresence } = useStreamContext();
 
   const { data: tokenData } = useQuery({
     queryKey: ["streamToken"],
@@ -126,6 +125,7 @@ const FullScreenChatPage = () => {
             } catch {
               // Not a member yet: ask the backend to create/add us, then retry.
               await ensureOrgChannel(channelOrUserId);
+                          markOrgChannelAsRead(channelOrUserId);
               await currChannel.watch();
             }
           } else {
@@ -288,12 +288,19 @@ const FullScreenChatPage = () => {
       : callsMuted
         ? "Calls muted"
         : null;
+  const subtitleLabel = isChannel
+    ? `${memberCount} members`
+    : dmPartnerPresence.label;
 
   const headerMembers = memberList.slice(0, 3);
   const extraCount = Math.max(0, memberCount - 3);
 
   return (
-    <div className="h-[calc(100vh-64px)] flex flex-col overflow-hidden bg-white">
+    <div className="mac-chat-shell h-full flex flex-col overflow-hidden relative">
+      {/* Immersive background decoration */}
+      <div className="absolute top-0 right-0 w-[420px] h-[420px] bg-sky-300/20 rounded-full blur-[120px] -mr-40 -mt-20 pointer-events-none"></div>
+      <div className="absolute bottom-0 left-0 w-[340px] h-[340px] bg-violet-200/20 rounded-full blur-[120px] -ml-24 -mb-24 pointer-events-none"></div>
+
       <ConnectionStatus chatClient={chatClient} />
 
       <Chat client={chatClient} theme="str-chat__theme-light">
@@ -307,177 +314,195 @@ const FullScreenChatPage = () => {
             />
           )}
         >
-          <div className="flex flex-col h-full w-full">
+          <div className="mac-chat-frame flex flex-col h-full w-full">
 
             {/* ════════════════════════════════
                 MODERN HEADER
             ════════════════════════════════ */}
-            <div className="flex-shrink-0 flex items-center justify-between px-6 py-3.5 bg-base-100/80 backdrop-blur-md border-b border-base-300 shadow-sm relative z-10">
-              {/* Left: Channel name + subtitle */}
-              <button
-                className="flex flex-col items-start hover:bg-base-200/50 px-3 py-1.5 rounded-xl transition-all min-w-0"
-                onClick={() => setShowInfo(true)}
-              >
-                <div className="flex items-center gap-2">
-                  {isChannel && (
-                    <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 text-primary">
-                      <HashIcon className="size-4 flex-shrink-0" strokeWidth={2.5} />
+            <div className="mac-chat-header flex-shrink-0 relative z-10">
+              <div className="flex items-center justify-between gap-4 px-5 py-4">
+                <div className="flex items-center gap-4 min-w-0">
+                  <button
+                    type="button"
+                    className="mac-chat-title min-w-0"
+                    onClick={() => setShowInfo(true)}
+                    aria-label={`Open conversation details for ${displayName}`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {isChannel && (
+                        <div className="flex items-center justify-center w-7 h-7 rounded-xl bg-primary/10 text-primary shadow-sm">
+                          <HashIcon className="size-4 flex-shrink-0" strokeWidth={2.4} />
+                        </div>
+                      )}
+                      <span className="font-semibold text-[17px] text-base-content leading-tight truncate">
+                        {displayName}
+                      </span>
+                      {mutedBadgeLabel && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-base-200/80 px-2.5 py-1 text-[11px] font-semibold text-base-content/65 border border-base-300/70">
+                          <BellOffIcon className="size-3.5" />
+                          {mutedBadgeLabel}
+                        </span>
+                      )}
                     </div>
-                  )}
-                  <span className="font-bold text-lg text-base-content leading-tight truncate">
-                    {displayName}
-                  </span>
-                  {mutedBadgeLabel && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-base-200 px-2.5 py-1 text-[11px] font-semibold text-base-content/60">
-                      <BellOffIcon className="size-3.5" />
-                      {mutedBadgeLabel}
+
+                    <span className="flex items-center gap-2 text-[13px] text-base-content/55 font-medium leading-tight mt-1.5 truncate">
+                      {!isChannel && dmPartner && (
+                        <span className={`inline-flex items-center gap-1.5 ${dmPartnerPresence.textClassName}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${dmPartnerPresence.dotClassName}`}></span>
+                        </span>
+                      )}
+                      {subtitleLabel}
                     </span>
-                  )}
+                  </button>
                 </div>
-                {isChannel && (
-                  <span className="text-[13px] text-base-content/60 font-medium leading-tight mt-0.5">
-                    {memberCount} members
-                  </span>
-                )}
-                {!isChannel && dmPartner && (
-                  <span className={`text-[13px] font-medium leading-tight mt-0.5 flex items-center gap-1.5 ${dmPartnerPresence.textClassName}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${dmPartnerPresence.dotClassName}`}></span>
-                    {dmPartnerPresence.label}
-                  </span>
-                )}
-              </button>
 
-              {/* Right: stacked avatars + action icons */}
-              <div className="flex items-center gap-2 flex-shrink-0">
+                {/* Right: stacked avatars + action icons */}
+                <div className="flex items-center gap-3 flex-shrink-0">
 
-                {/* Stacked member avatars (channel only) */}
-                {isChannel && headerMembers.length > 0 && (
-                  <button
-                    onClick={() => setShowMembers(true)}
-                    className="flex items-center hover:opacity-80 transition-opacity mr-3 group"
-                    title="View members"
-                  >
-                    <div className="flex -space-x-2.5 group-hover:-space-x-1.5 transition-all duration-300">
-                      {headerMembers.map((m, i) => (
-                        <Avatar
-                          key={m.user_id || i}
-                          src={getUserImage(m.user_id) || m.user?.image}
-                          name={m.user?.name}
-                          size="w-8 h-8"
-                          className="border-2 border-base-100 shadow-sm"
-                          style={{ zIndex: headerMembers.length - i }}
-                        />
-                      ))}
-                    </div>
-                    {extraCount > 0 && (
-                      <span className="text-[13px] font-bold ml-2 text-primary/80 bg-primary/10 px-2 py-0.5 rounded-full">
-                        +{extraCount}
-                      </span>
-                    )}
-                  </button>
-                )}
-
-                {/* Action buttons */}
-                <div className="flex items-center gap-1 bg-base-200/50 p-1 rounded-xl">
-                  {isCallOngoing(activeConversationCall) ? (
-                    <div className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold bg-success/10 text-success border border-success/20 shadow-sm">
-                      <span className="tabular-nums">
-                        {Math.floor(callDuration / 60)}:{(callDuration % 60).toString().padStart(2, "0")}
-                      </span>
-                      <button
-                        onClick={() => {
-                          setCallId(activeConversationCall.callId);
-                          setCallParticipantIds(activeConversationCall.participantIds?.length ? [authUser._id, ...activeConversationCall.participantIds.filter((id) => id !== authUser._id)] : participantIds);
-                          setCallParticipantNames(activeConversationCall.participantNames?.length ? activeConversationCall.participantNames : participantNames);
-                          setCallParticipantProfiles(activeConversationCall.participantProfiles?.length ? activeConversationCall.participantProfiles : participantProfiles);
-                          setCallType(activeConversationCall.type || "video");
-                          setIsInitiatingCall(false);
-                          setShowVideoCall(true);
-                        }}
-                        className="btn btn-xs btn-success"
-                      >
-                        Rejoin
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <button
-                        title="Start voice call"
-                        onClick={() => {
-                          if (participantIds.length < 2) {
-                            toast.error("No other participants available for this call.");
-                            return;
-                          }
-
-                          setCallId(`call-${channelOrUserId}-${Date.now()}`);
-                          setCallParticipantIds(participantIds);
-                          setCallParticipantNames(participantNames);
-                          setCallParticipantProfiles(participantProfiles);
-                          setCallType("audio");
-                          setIsInitiatingCall(true);
-                          setShowVideoCall(true);
-                        }}
-                        className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
-                      >
-                        <PhoneIcon className="size-[18px]" />
-                      </button>
-
-                      <button
-                        title="Start video call"
-                        onClick={() => {
-                          if (participantIds.length < 2) {
-                            toast.error("No other participants available for this call.");
-                            return;
-                          }
-
-                          setCallId(`call-${channelOrUserId}-${Date.now()}`);
-                          setCallParticipantIds(participantIds);
-                          setCallParticipantNames(participantNames);
-                          setCallParticipantProfiles(participantProfiles);
-                          setCallType("video");
-                          setIsInitiatingCall(true);
-                          setShowVideoCall(true);
-                        }}
-                        className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
-                      >
-                        <VideoIcon className="size-[18px]" />
-                      </button>
-                    </>
-                  )}
-
-                  <button
-                    title="Search (Ctrl+F)"
-                    onClick={() => setShowSearch((v) => !v)}
-                    className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
-                  >
-                    <SearchIcon className="size-[18px]" />
-                  </button>
-
-                  <button
-                    title="Call history"
-                    onClick={() => setShowCallLogs(true)}
-                    className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
-                  >
-                    <HistoryIcon className="size-[18px]" />
-                  </button>
-
-                  {isChannel && (
+                  {/* Stacked member avatars (channel only) */}
+                  {isChannel && headerMembers.length > 0 && (
                     <button
-                      title="Members"
+                      type="button"
                       onClick={() => setShowMembers(true)}
-                      className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
+                      className="mac-member-stack group"
+                      title="View members"
+                      aria-label="Open member list"
                     >
-                      <UsersIcon className="size-[18px]" />
+                      <div className="flex -space-x-2.5 group-hover:-space-x-1.5 transition-all duration-300">
+                        {headerMembers.map((m, i) => (
+                          <Avatar
+                            key={m.user_id || i}
+                            src={getUserImage(m.user_id) || m.user?.image}
+                            name={m.user?.name}
+                            size="w-8 h-8"
+                            className="border-2 border-white/90 shadow-sm"
+                            style={{ zIndex: headerMembers.length - i }}
+                          />
+                        ))}
+                      </div>
+                      {extraCount > 0 && (
+                        <span className="text-[13px] font-semibold ml-2 text-base-content/70 bg-base-100/85 px-2 py-0.5 rounded-full border border-base-300/70">
+                          +{extraCount}
+                        </span>
+                      )}
                     </button>
                   )}
 
-                  <button
-                    title="More options"
-                    onClick={() => setShowInfo(true)}
-                    className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-base-100 hover:shadow-sm hover:text-primary text-base-content/60"
-                  >
-                    <MoreVerticalIcon className="size-[18px]" />
-                  </button>
+                  {/* Action buttons */}
+                  <div className="mac-toolbar-group">
+                    {isCallOngoing(activeConversationCall) ? (
+                      <div className="mac-live-pill">
+                        <span className="tabular-nums">
+                          {Math.floor(callDuration / 60)}:{(callDuration % 60).toString().padStart(2, "0")}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCallId(activeConversationCall.callId);
+                            setCallParticipantIds(activeConversationCall.participantIds?.length ? [authUser._id, ...activeConversationCall.participantIds.filter((id) => id !== authUser._id)] : participantIds);
+                            setCallParticipantNames(activeConversationCall.participantNames?.length ? activeConversationCall.participantNames : participantNames);
+                            setCallParticipantProfiles(activeConversationCall.participantProfiles?.length ? activeConversationCall.participantProfiles : participantProfiles);
+                            setCallType(activeConversationCall.type || "video");
+                            setIsInitiatingCall(false);
+                            setShowVideoCall(true);
+                          }}
+                          className="btn btn-xs btn-success"
+                        >
+                          Rejoin
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          title="Start voice call"
+                          aria-label="Start voice call"
+                          onClick={() => {
+                            if (participantIds.length < 2) {
+                              toast.error("No other participants available for this call.");
+                              return;
+                            }
+
+                            setCallId(`call-${channelOrUserId}-${Date.now()}`);
+                            setCallParticipantIds(participantIds);
+                            setCallParticipantNames(participantNames);
+                            setCallParticipantProfiles(participantProfiles);
+                            setCallType("audio");
+                            setIsInitiatingCall(true);
+                            setShowVideoCall(true);
+                          }}
+                          className="mac-toolbar-button"
+                        >
+                          <PhoneIcon className="size-[18px]" />
+                        </button>
+
+                        <button
+                          type="button"
+                          title="Start video call"
+                          aria-label="Start video call"
+                          onClick={() => {
+                            if (participantIds.length < 2) {
+                              toast.error("No other participants available for this call.");
+                              return;
+                            }
+
+                            setCallId(`call-${channelOrUserId}-${Date.now()}`);
+                            setCallParticipantIds(participantIds);
+                            setCallParticipantNames(participantNames);
+                            setCallParticipantProfiles(participantProfiles);
+                            setCallType("video");
+                            setIsInitiatingCall(true);
+                            setShowVideoCall(true);
+                          }}
+                          className="mac-toolbar-button"
+                        >
+                          <VideoIcon className="size-[18px]" />
+                        </button>
+                      </>
+                    )}
+
+                    <button
+                      type="button"
+                      title="Search messages"
+                      aria-label="Search messages"
+                      onClick={() => setShowSearch((v) => !v)}
+                      className={`mac-toolbar-button ${showSearch ? "bg-primary/12 text-primary shadow-sm" : ""}`}
+                    >
+                      <SearchIcon className="size-[18px]" />
+                    </button>
+
+                    <button
+                      type="button"
+                      title="Call history"
+                      aria-label="Open call history"
+                      onClick={() => setShowCallLogs(true)}
+                      className="mac-toolbar-button"
+                    >
+                      <HistoryIcon className="size-[18px]" />
+                    </button>
+
+                    {isChannel && (
+                      <button
+                        type="button"
+                        title="Members"
+                        aria-label="Open members panel"
+                        onClick={() => setShowMembers(true)}
+                        className={`mac-toolbar-button ${showMembers ? "bg-primary/12 text-primary shadow-sm" : ""}`}
+                      >
+                        <UsersIcon className="size-[18px]" />
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      title="Conversation info"
+                      aria-label="Open conversation info"
+                      onClick={() => setShowInfo(true)}
+                      className={`mac-toolbar-button ${showInfo ? "bg-primary/12 text-primary shadow-sm" : ""}`}
+                    >
+                      <MoreVerticalIcon className="size-[18px]" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -503,11 +528,11 @@ const FullScreenChatPage = () => {
             {/* ════════════════════════════════
                 MESSAGES + INPUT
             ════════════════════════════════ */}
-            <div className="flex flex-1 min-h-0 overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-base-200/20">
+            <div className="mac-chat-content flex flex-1 min-h-0 overflow-hidden relative">
               <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
                 <Window>
                   <MessageList
-                    Message={SlackMessage}
+                    Message={PremiumMessage}
                     messageActions={["edit", "delete", "reply", "react", "quote"]}
                     messageLimit={50}
                     hideDeletedMessages={false}
@@ -519,21 +544,27 @@ const FullScreenChatPage = () => {
                     <TypingIndicator />
                   </div>
 
-                  <MessageInput
-                    focus
-                    grow
-                    maxRows={6}
-                    additionalTextareaProps={{
-                      placeholder: isChannel
-                        ? `Message #${displayName}…`
-                        : `Message ${displayName}…`,
-                    }}
-                  />
+                  <div className="px-6 pb-6 pt-3 bg-transparent mt-auto relative z-20">
+                    <div className="mac-composer-shell">
+                      <MessageInput
+                        focus
+                        grow
+                        maxRows={10}
+                        additionalTextareaProps={{
+                          placeholder: isChannel
+                            ? `Message #${displayName}…`
+                            : `Message ${displayName}…`,
+                        }}
+                      />
+                    </div>
+                  </div>
                 </Window>
               </div>
 
               {/* Thread panel — uses SlackMessage for visual consistency */}
-              <Thread Message={SlackMessage} autoFocus />
+              <div className="mac-thread-wrapper">
+                <Thread Message={PremiumMessage} autoFocus />
+              </div>
             </div>
 
           </div>

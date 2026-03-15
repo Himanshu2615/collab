@@ -388,6 +388,7 @@ const TimeGridColumn = ({ day, layoutedMeetings, onClickSlot, onClickBlock, isCu
 const SchedulePage = () => {
   const queryClient = useQueryClient();
   const { authUser }  = useAuthUser();
+  const navigate = useNavigate();
   const isAdmin       = ["admin", "owner"].includes(authUser?.role);
 
   const [viewMode,     setViewMode]    = useState("week");
@@ -514,6 +515,12 @@ const SchedulePage = () => {
     setActiveEvent({ meeting, anchorRect });
   }, []);
 
+  const handleStartInstantHuddle = useCallback(() => {
+    const safeOrg = (authUser?.organization || "workspace").toString().slice(-6);
+    const huddleId = `huddle-${safeOrg}-${Date.now()}`;
+    navigate(`/call/${huddleId}`);
+  }, [authUser?.organization, navigate]);
+
   /* close popover on scroll */
   useEffect(() => {
     const handler = () => setActiveEvent(null);
@@ -600,7 +607,10 @@ const SchedulePage = () => {
 
         {/* Instant Huddle */}
         <div className="p-3 pt-2 border-t border-gray-100 mt-1">
-          <button className="w-full py-2 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-xl flex items-center justify-center gap-1.5 transition">
+          <button
+            onClick={handleStartInstantHuddle}
+            className="w-full py-2 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-xl flex items-center justify-center gap-1.5 transition"
+          >
             <Zap className="size-3.5" /> Start Instant Huddle
           </button>
         </div>

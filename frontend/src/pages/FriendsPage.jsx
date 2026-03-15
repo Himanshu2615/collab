@@ -86,35 +86,38 @@ const FriendsPage = () => {
   }, [lookupResult?.user?._id, myFriends, refreshUserPresence, teamMembers]);
 
   return (
-    <div className="p-4 sm:p-8 min-h-screen bg-base-100">
+    <div className="min-h-full p-3 sm:p-6 lg:p-8 bg-gradient-to-b from-base-200/45 via-base-100 to-base-200/35">
+      <div className="mx-auto max-w-7xl">
       {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-3">
-            <UsersIcon className="size-8 text-primary" />
+      <div className="mb-6 rounded-[26px] border border-base-300/75 bg-base-100/88 px-5 py-5 shadow-[0_10px_28px_rgba(15,23,42,0.06)] backdrop-blur-sm sm:px-6 sm:py-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-3">
+              <UsersIcon className="size-8 text-primary" />
             Team & Friends
-          </h1>
-          <p className="text-base-content/60 mt-1">
-            {myFriends.length} friend{myFriends.length !== 1 ? "s" : ""} · {teamMembers.length} team member{teamMembers.length !== 1 ? "s" : ""}
-          </p>
-        </div>
+            </h1>
+            <p className="text-base-content/60 mt-1">
+              {myFriends.length} friend{myFriends.length !== 1 ? "s" : ""} · {teamMembers.length} team member{teamMembers.length !== 1 ? "s" : ""}
+            </p>
+          </div>
 
-        {/* Search input */}
-        <div className="relative w-full sm:w-72">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-base-content/40" />
-          <input
-            type="text"
-            placeholder="Search by name or language..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="input input-bordered w-full pl-10"
-          />
+          {/* Search input */}
+          <div className="relative w-full sm:w-80">
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-base-content/40" />
+            <input
+              type="text"
+              placeholder="Search by name or language..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded-xl border border-base-300/80 bg-base-100/75 py-2.5 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary/40"
+            />
+          </div>
         </div>
       </div>
 
-      <div className="card bg-base-200 border border-base-300 p-5 sm:p-6 mb-8">
+      <div className="rounded-[24px] border border-base-300/75 bg-base-100/90 p-5 sm:p-6 mb-6 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
         <div className="flex items-start gap-3 mb-4">
-          <div className="bg-primary/10 text-primary rounded-xl p-2.5">
+          <div className="rounded-xl p-2.5 bg-primary/12 text-primary">
             <HashIcon className="size-5" />
           </div>
           <div>
@@ -131,12 +134,12 @@ const FriendsPage = () => {
             placeholder="Paste user ID..."
             value={lookupId}
             onChange={(e) => setLookupId(e.target.value)}
-            className="input input-bordered flex-1 font-mono"
+            className="flex-1 rounded-xl border border-base-300/80 bg-base-100/80 px-3 py-2.5 text-sm font-mono outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary/40"
           />
           <button
             onClick={handleLookup}
             disabled={isLookingUp || !lookupId.trim()}
-            className="btn btn-primary gap-2"
+            className="btn btn-primary gap-2 rounded-xl"
           >
             <SearchIcon className="size-4" />
             {isLookingUp ? "Searching..." : "Find User"}
@@ -144,7 +147,7 @@ const FriendsPage = () => {
         </div>
 
         {lookupResult?.user && (
-          <div className="mt-4 rounded-xl border border-base-300 bg-base-100 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="mt-4 rounded-2xl border border-base-300/80 bg-base-200/35 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
             <Avatar
               src={lookupResult.user.profilePic}
               name={lookupResult.user.fullName}
@@ -169,18 +172,18 @@ const FriendsPage = () => {
             </div>
 
             {lookupResult.user.isFriend ? (
-              <span className="btn btn-success btn-sm gap-2 pointer-events-none">
+              <span className="btn btn-success btn-sm gap-2 pointer-events-none rounded-xl">
                 <CheckCircleIcon className="size-4" /> Already connected
               </span>
             ) : lookupResult.existingRequest ? (
-              <span className="btn btn-outline btn-sm gap-2 pointer-events-none">
+              <span className="btn btn-outline btn-sm gap-2 pointer-events-none rounded-xl">
                 <CheckCircleIcon className="size-4 text-success" /> Request pending
               </span>
             ) : (
               <button
                 onClick={() => sendRequest(lookupResult.user._id)}
                 disabled={isSendingRequest}
-                className="btn btn-primary btn-sm gap-2"
+                className="btn btn-primary btn-sm gap-2 rounded-xl"
               >
                 <UserPlusIcon className="size-4" />
                 {isSendingRequest ? "Sending..." : "Send Request"}
@@ -191,7 +194,7 @@ const FriendsPage = () => {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-        <div className="card bg-base-200 border border-base-300 p-5">
+        <div className="rounded-2xl border border-base-300/70 bg-base-100/85 p-5 shadow-[0_8px_20px_rgba(15,23,42,0.04)]">
           <div className="flex items-center gap-3">
             <div className="bg-primary/10 text-primary rounded-xl p-2.5">
               <HeartIcon className="size-5" />
@@ -202,7 +205,7 @@ const FriendsPage = () => {
             </div>
           </div>
         </div>
-        <div className="card bg-base-200 border border-base-300 p-5">
+        <div className="rounded-2xl border border-base-300/70 bg-base-100/85 p-5 shadow-[0_8px_20px_rgba(15,23,42,0.04)]">
           <div className="flex items-center gap-3">
             <div className="bg-secondary/10 text-secondary rounded-xl p-2.5">
               <Building2Icon className="size-5" />
@@ -233,7 +236,7 @@ const FriendsPage = () => {
 
             {filteredFriends.length === 0 ? (
               search ? (
-                <div className="card bg-base-200 border border-base-300 p-8 text-center text-base-content/60">
+                <div className="rounded-2xl border border-base-300/80 bg-base-100/80 p-8 text-center text-base-content/60">
                   No friend matches found for <strong>"{search}"</strong>
                 </div>
               ) : (
@@ -258,7 +261,7 @@ const FriendsPage = () => {
             </div>
 
             {filteredTeamMembers.length === 0 ? (
-              <div className="card bg-base-200 border border-base-300 p-8 text-center text-base-content/60">
+              <div className="rounded-2xl border border-base-300/80 bg-base-100/80 p-8 text-center text-base-content/60">
                 {search ? (
                   <>No team matches found for <strong>"{search}"</strong></>
                 ) : (
@@ -275,6 +278,7 @@ const FriendsPage = () => {
           </section>
         </div>
       )}
+      </div>
     </div>
   );
 };

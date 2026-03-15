@@ -96,11 +96,12 @@ const InCallScreenShareButton = () => {
     <button
       onClick={handleToggle}
       disabled={isDisabled}
-      className={`btn btn-sm gap-2 ${isSharingScreen ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'} ${isDisabled ? 'btn-disabled' : ''}`}
-      title={isSomeoneScreenSharing && !isSharingScreen ? 'Another participant is already sharing' : 'Share your screen'}
+      title={isSomeoneScreenSharing && !isSharingScreen ? 'Another participant is already sharing' : label}
+      className={`flex size-12 items-center justify-center rounded-full transition-all focus:outline-none
+        ${isSharingScreen ? 'bg-violet-500 text-white hover:bg-violet-600' : 'bg-white/15 text-white hover:bg-white/25'}
+        ${isDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
     >
-      <MonitorUpIcon className="size-4" />
-      {label}
+      <MonitorUpIcon className="size-5" />
     </button>
   );
 };
@@ -137,10 +138,10 @@ const InCallRecordingButton = ({ onStateChange }) => {
     return (
       <button
         disabled
-        className="btn btn-sm gap-2 btn-disabled"
-        title="Recording is not enabled for this call or your role"
+        title="Recording unavailable for your role"
+        className="flex size-12 items-center justify-center rounded-full bg-white/15 text-white/30 cursor-not-allowed opacity-40"
       >
-        <RadioIcon className="size-4" /> Recording unavailable
+        <RadioIcon className="size-5" />
       </button>
     );
   }
@@ -149,11 +150,12 @@ const InCallRecordingButton = ({ onStateChange }) => {
     <button
       onClick={handleToggle}
       disabled={isAwaitingResponse}
-      className={`btn btn-sm gap-2 ${isCallRecordingInProgress ? 'btn-error' : 'btn-outline border-white/20 text-white hover:bg-white/10'} ${isAwaitingResponse ? 'btn-disabled' : ''}`}
-      title={isAwaitingResponse ? (isCallRecordingInProgress ? 'Waiting for recording to stop...' : 'Waiting for recording to start...') : isCallRecordingInProgress ? 'Stop recording' : 'Record call'}
+      title={isCallRecordingInProgress ? 'Stop recording' : 'Record call'}
+      className={`flex size-12 items-center justify-center rounded-full transition-all focus:outline-none
+        ${isCallRecordingInProgress ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-white/15 text-white hover:bg-white/25'}
+        ${isAwaitingResponse ? 'opacity-50 cursor-wait' : ''}`}
     >
-      <RadioIcon className={`size-4 ${isCallRecordingInProgress ? 'animate-pulse' : ''}`} />
-      {isAwaitingResponse ? (isCallRecordingInProgress ? 'Stopping…' : 'Starting…') : isCallRecordingInProgress ? 'Stop recording' : 'Record'}
+      <RadioIcon className={`size-5 ${isCallRecordingInProgress ? 'animate-pulse' : ''}`} />
     </button>
   );
 };
@@ -182,10 +184,14 @@ const InCallInviteBackButton = ({ members = [], onInvite }) => {
     <button
       onClick={() => onInvite?.(missingMembers)}
       disabled={missingMembers.length === 0}
-      className={`btn btn-sm gap-2 ${missingMembers.length > 0 ? 'btn-outline border-white/20 text-white hover:bg-white/10' : 'btn-disabled'}`}
-      title={missingMembers.length > 0 ? 'Ring members who left or have not joined yet' : 'All invited members are already in the call'}
+      title={missingMembers.length > 0 ? label : 'All invited members are in the call'}
+      className={`flex h-12 items-center gap-2 rounded-full px-4 text-sm font-medium transition-all focus:outline-none
+        ${missingMembers.length > 0
+          ? 'bg-white/15 text-white hover:bg-white/25'
+          : 'bg-white/5 text-white/30 cursor-not-allowed'}`}
     >
-      <UsersIcon className="size-4" /> {label}
+      <UsersIcon className="size-4" />
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 };
@@ -202,8 +208,6 @@ const VideoCallModal = ({
   participantProfiles = [],
   callType = 'video',
   conversationId = '',
-  callerUserId = null,
-  isChannel = false,
 }) => {
   const [client, setClient] = useState(null);
   const [call, setCall] = useState(null);
@@ -255,11 +259,9 @@ const VideoCallModal = ({
   const [transcriptEntries, setTranscriptEntries] = useState([]);
   const [transcriptDraft, setTranscriptDraft] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [isDownloadingTranscript, setIsDownloadingTranscript] = useState(false);
   const recognitionRef = useRef(null);
   const isTranscribingRef = useRef(false);
   const pendingEntriesRef = useRef([]);
-  const micEnabledRef = useRef(true);
   const transcriptEndRef = useRef(null);
 
   const updateDraftStroke = (updater) => {
@@ -440,9 +442,16 @@ const VideoCallModal = ({
             updateCallLog(callId, {
               status: 'left',
               lastLeftAt: new Date().toISOString(),
-              endTime: new Date().toISOString(),
             });
-            removeActiveCall(callId);
+            upsertActiveCall({
+              callId,
+              conversationId,
+              type: callType,
+              participantIds: Array.from(new Set(participantIds)).filter(Boolean),
+              participantNames: Array.from(new Set(participantNames)).filter(Boolean),
+              participantProfiles,
+              status: 'ongoing',
+            });
             currentCall.leave().catch(() => {});
           }
         } else {
@@ -510,10 +519,8 @@ const VideoCallModal = ({
   };
 
   const appendTranscriptEntry = (entry) => {
-    // accept id or entryId for backward compatibility during live call
-    const keyId = entry?.entryId || entry?.id;
-    if (!keyId) return;
-    setTranscriptEntries((prev) => (prev.some((e) => (e.entryId || e.id) === keyId) ? prev : [...prev, entry]));
+    if (!entry?.id) return;
+    setTranscriptEntries((prev) => (prev.some((e) => e.id === entry.id) ? prev : [...prev, entry]));
   };
 
   const startTranscription = () => {
@@ -529,15 +536,13 @@ const VideoCallModal = ({
     recognition.lang = 'en-US';
 
     recognition.onresult = (event) => {
-      // Silently discard ALL results while the mic is muted (privacy guard)
-      if (!micEnabledRef.current) return;
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
           const text = result[0].transcript.trim();
           if (!text) continue;
           const entry = {
-            entryId: createEventId(),
+            id: createEventId(),
             speakerId: user._id,
             speakerName: user.fullName,
             text,
@@ -591,51 +596,20 @@ const VideoCallModal = ({
     }
   };
 
-  useEffect(() => {
-    if (!isOpen || !callId) return;
-    const intervalId = setInterval(() => {
-      if (pendingEntriesRef.current.length > 0) {
-        const entries = [...pendingEntriesRef.current];
-        pendingEntriesRef.current = [];
-        saveTranscriptEntries(callId, entries).catch(() => {});
-      }
-    }, 5000);
-    return () => clearInterval(intervalId);
-  }, [isOpen, callId]);
-
-  const downloadTranscript = async () => {
-    try {
-      if (!callId) {
-        toast.error("No valid call reference found.");
-        return;
-      }
-      setIsDownloadingTranscript(true);
-      
-      const response = await getTranscript(callId);
-      
-      if (!response || !response.cloudinaryUrl) {
-        toast.error("Transcript file could not be generated.");
-        setIsDownloadingTranscript(false);
-        return;
-      }
-
-      const link = document.createElement('a');
-      link.href = response.cloudinaryUrl;
-      link.target = "_blank";
-      link.download = `Transcript-${callId}.txt`;
-      link.click();
-      
-      toast.success("Transcript downloaded");
-      setIsDownloadingTranscript(false);
-    } catch (error) {
-      console.error("Error downloading transcript:", error);
-      setIsDownloadingTranscript(false);
-      if (error?.response?.status === 404) {
-        toast.error("No transcript available for this meeting.");
-      } else {
-        toast.error("Failed to download transcript.");
-      }
-    }
+  const downloadTranscript = () => {
+    if (!transcriptEntries.length) return;
+    const lines = transcriptEntries.map((entry) => {
+      const time = new Date(entry.timestamp).toLocaleTimeString();
+      const speaker = entry.speakerId === user._id ? 'You' : entry.speakerName;
+      return `[${time}] ${speaker}: ${entry.text}`;
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `transcript-${callId}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const ensureBoardSizeForPoints = (points = [], scope = 'shared') => {
@@ -719,8 +693,7 @@ const VideoCallModal = ({
 
       if (custom.type === TRANSCRIPT_EVENT) {
         const entry = custom.entry;
-        const keyId = entry?.entryId || entry?.id;
-        if (!keyId || entry.speakerId === user?._id) return;
+        if (!entry?.id || entry.speakerId === user?._id) return;
         appendTranscriptEntry(entry);
       }
     });
@@ -759,7 +732,7 @@ const VideoCallModal = ({
           data: {
             members: uniqueParticipantIds.map((id) => ({ user_id: id })),
             ...(team ? { team } : {}),
-            custom: { conversationId, isChannel },
+            custom: { conversationId },
           },
         });
       } else {
@@ -795,7 +768,6 @@ const VideoCallModal = ({
       registerCustomEventHandlers(videoCall);
       setCall(videoCall);
       setIsInCallMicEnabled(isMicEnabled);
-      micEnabledRef.current = isMicEnabled;
       setIsInCallCamEnabled(callType === 'video' ? isCamEnabled : false);
       setPreviewStream((current) => {
         current?.getTracks().forEach((track) => track.stop());
@@ -807,15 +779,13 @@ const VideoCallModal = ({
         conversationId,
         type: callType,
         startTime: new Date().toISOString(),
-        hostId: videoCall?.state?.createdBy?.id || (isInitiator ? user._id : callerUserId),
         participants: Array.from(new Set(participantNames)).filter(Boolean),
         participantIds: Array.from(new Set(participantIds)).filter((id) => id && id !== user._id),
-        participantProfiles: participantProfiles.filter((member) => !member.isYou && member.id !== user._id),
+        participantProfiles: meetingRoster.filter((member) => !member.isYou),
         status: 'started',
-        isChannel,
       };
 
-      await saveCallLog(callLog);
+      saveCallLog(callLog);
       upsertActiveCall({
         ...callLog,
         status: 'ongoing',
@@ -881,7 +851,7 @@ const VideoCallModal = ({
       });
       await activeCall.ring();
 
-      await updateCallLog(callId, {
+      updateCallLog(callId, {
         lastRangAt: new Date().toISOString(),
         ringAgainCount: ((JSON.parse(localStorage.getItem('callLogs') || '[]').find((entry) => entry.callId === callId)?.ringAgainCount) || 0) + 1,
       });
@@ -909,15 +879,10 @@ const VideoCallModal = ({
       if (isInCallMicEnabled) {
         await activeCall.microphone.disable();
         setIsInCallMicEnabled(false);
-        // Mark mic as muted so speech recognition discards all results (privacy guard)
-        micEnabledRef.current = false;
-        setTranscriptDraft('');
       } else {
         await activeCall.microphone.enable();
         if (selectedMicId) await activeCall.microphone.select(selectedMicId);
         setIsInCallMicEnabled(true);
-        // Allow speech recognition results again
-        micEnabledRef.current = true;
       }
     } catch (error) {
       console.error('Microphone toggle error:', error);
@@ -950,19 +915,26 @@ const VideoCallModal = ({
       const participants = activeCall?.state?.participants || [];
       // If we are the only participant left in the call (or 0 somehow)
       if (participants.length <= 1) {
-        await updateCallLog(callId, {
+        updateCallLog(callId, {
           status: 'ended',
           endTime: new Date().toISOString(),
         });
         removeActiveCall(callId);
         await activeCall?.endCall();
       } else {
-        await updateCallLog(callId, {
+        updateCallLog(callId, {
           status: 'left',
           lastLeftAt: new Date().toISOString(),
-          endTime: new Date().toISOString(),
         });
-        removeActiveCall(callId);
+        upsertActiveCall({
+          callId,
+          conversationId,
+          type: callType,
+          participantIds: Array.from(new Set(participantIds)).filter(Boolean),
+          participantNames: Array.from(new Set(participantNames)).filter(Boolean),
+          participantProfiles: meetingRoster.filter((member) => !member.isYou),
+          status: 'ongoing',
+        });
         await activeCall?.leave();
       }
     } catch (_) {
@@ -1323,453 +1295,418 @@ const VideoCallModal = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-0 sm:p-4">
-      <div className="relative h-full w-full max-w-7xl overflow-hidden sm:max-h-[92vh] sm:rounded-3xl">
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute right-3 top-3 z-50 btn btn-circle btn-error btn-sm sm:right-4 sm:top-4"
-        >
-          <XIcon className="size-5" />
-        </button>
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#0d0f13]">
+      {/* ── Active call ── */}
+      {client && call ? (
+        <StreamVideo client={client}>
+          <StreamCall call={call}>
+            <div className="relative flex h-full w-full overflow-hidden">
 
-        {/* Video call UI */}
-        {client && call ? (
-          <StreamVideo client={client}>
-            <StreamCall call={call}>
-              <div className="relative flex h-full flex-col overflow-hidden bg-[#eef2f7] text-base-content sm:rounded-3xl">
-                <div className="flex items-center justify-between gap-3 border-b border-base-300 bg-base-100 px-4 py-3 sm:px-5">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-3 text-sm font-semibold">
-                      <span className="inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
-                      <span className="truncate">{workspaceLabel}</span>
-                      <span className="text-base-content/25">|</span>
-                      <span className="truncate text-base-content/55">{sessionLabel}</span>
-                      {isRecording && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-error/10 px-2.5 py-1 text-[11px] font-semibold text-error">
-                          <span className="inline-flex size-2 rounded-full bg-error animate-pulse" /> Recording live
-                        </span>
-                      )}
-                      {!canRecord && call && (
-                        <span className="inline-flex items-center rounded-full bg-base-200 px-2.5 py-1 text-[11px] font-semibold text-base-content/55">
-                          Recording unavailable
-                        </span>
+              {/* ── Top bar ── */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between px-5 py-3"
+                style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, transparent 100%)' }}
+              >
+                <div className="pointer-events-auto flex items-center gap-3">
+                  <span className="inline-flex size-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-sm font-semibold text-white/90 truncate max-w-[220px]">{workspaceLabel}</span>
+                  <span className="text-white/25 text-xs">·</span>
+                  <span className="text-sm text-white/55 truncate max-w-[200px]">{sessionLabel}</span>
+                  {isRecording && (
+                    <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-400 border border-red-500/30">
+                      <span className="inline-flex size-1.5 rounded-full bg-red-400 animate-pulse" />
+                      REC
+                    </span>
+                  )}
+                </div>
+                <div className="pointer-events-auto flex items-center gap-2">
+                  {isWhiteboardShared && (
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/70 border border-white/10">
+                      <PenToolIcon className="inline size-3 mr-1 -mt-0.5" />
+                      {isSharedBoardOwner ? 'Your whiteboard is shared' : `${sharedWhiteboardOwnerName || 'Participant'}'s whiteboard`}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Main stage + sidebar ── */}
+              <div className={`flex min-h-0 flex-1 ${isSidebarOpen ? 'grid grid-cols-[1fr_340px]' : ''}`}>
+
+                {/* ── Video stage ── */}
+                <div className="relative flex min-h-0 flex-1 flex-col bg-[#0d0f13]">
+                  {activeStageTab === 'whiteboard' ? (
+                    showWhiteboardPopup ? (
+                      <div className="flex h-full items-center justify-center text-white/40">
+                        <div className="text-center">
+                          <PenToolIcon className="mx-auto mb-3 size-10 opacity-50" />
+                          <p className="font-semibold">Whiteboard opened in popup</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div ref={whiteboardScrollRef} className="h-full overflow-auto bg-[#f8f9ff] p-4">
+                        <div
+                          ref={whiteboardRef}
+                          className={`relative rounded-2xl border border-slate-200 bg-white shadow-inner touch-none ${canEditSharedWhiteboard ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
+                          style={{ width: `${boardSize.width}px`, height: `${boardSize.height}px` }}
+                          onPointerDown={startDrawing}
+                          onPointerMove={continueDrawing}
+                          onPointerUp={stopDrawing}
+                          onPointerLeave={stopDrawing}
+                        >
+                          <div
+                            className="absolute inset-0 opacity-30"
+                            style={{
+                              backgroundImage: 'radial-gradient(circle, rgba(148,163,184,0.3) 1px, transparent 1px)',
+                              backgroundSize: '22px 22px',
+                            }}
+                          />
+                          <svg className="pointer-events-none absolute inset-0 h-full w-full">
+                            {renderedStrokes.map((stroke) => (
+                              <path
+                                key={stroke.id}
+                                d={pointsToSvgPath(stroke.points)}
+                                fill="none"
+                                stroke={stroke.color}
+                                strokeWidth={stroke.width}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            ))}
+                          </svg>
+                          {renderedStrokes.length === 0 && (
+                            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-center text-slate-400">
+                              <div>
+                                <PenToolIcon className="mx-auto mb-3 size-10 opacity-40" />
+                                <p className="font-medium">Start drawing on the whiteboard</p>
+                                <p className="mt-1 text-sm">Canvas expands as you draw toward the edges.</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    <div className="relative h-full w-full overflow-hidden">
+                      <SpeakerLayout VideoPlaceholder={CallVideoPlaceholder} />
+                      {isWhiteboardShared && callType === 'video' && (
+                        <div className="absolute bottom-28 right-4 h-[120px] w-[200px] overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
+                          <SpeakerLayout VideoPlaceholder={CallVideoPlaceholder} />
+                        </div>
                       )}
                     </div>
-                  </div>
+                  )}
 
-                  <div className="flex items-center gap-2">
-                    <button className="btn btn-ghost btn-sm btn-square"><InfoIcon className="size-4" /></button>
-                    <button className="btn btn-ghost btn-sm btn-square"><MoreHorizontalIcon className="size-4" /></button>
+                  {/* ── Whiteboard toolbar (appears above controls when whiteboard active) ── */}
+                  {activeStageTab === 'whiteboard' && !showWhiteboardPopup && (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-24 z-20 flex justify-center px-4">
+                      <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 shadow-xl backdrop-blur-md">
+                        {isWhiteboardShared && isSharedBoardOwner && (
+                          <button onClick={toggleSharedWhiteboardCollaboration} className={`btn btn-xs gap-1.5 ${isSharedWhiteboardCollaborative ? 'btn-secondary' : 'btn-ghost text-white/70'}`}>
+                            <PenToolIcon className="size-3" /> {isSharedWhiteboardCollaborative ? 'Collab on' : 'View-only'}
+                          </button>
+                        )}
+                        {isWhiteboardShared && isSharedBoardOwner && (
+                          <button onClick={clearWhiteboard} className="btn btn-ghost btn-xs text-white/60 hover:text-red-400" title="Clear">
+                            <Trash2Icon className="size-3.5" />
+                          </button>
+                        )}
+                        <button onClick={() => setShowWhiteboardPopup(true)} className="btn btn-ghost btn-xs text-white/60" title="Popout">
+                          <MonitorUpIcon className="size-3.5" />
+                        </button>
+                        {isWhiteboardShared && isSharedBoardOwner && (
+                          <button onClick={() => {
+                            const blob = new Blob([JSON.stringify(whiteboardStrokes, null, 2)], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.href = url; link.download = `whiteboard-${callId}.json`; link.click();
+                            URL.revokeObjectURL(url);
+                          }} className="btn btn-ghost btn-xs text-white/60" title="Export"><DownloadIcon className="size-3.5" /></button>
+                        )}
+                        {isWhiteboardShared && isSharedBoardOwner && (
+                          <button onClick={stopWhiteboardShare} className="btn btn-ghost btn-xs text-red-400">Stop sharing</button>
+                        )}
+                        {!isWhiteboardShared && (
+                          <button onClick={shareWhiteboard} className="btn btn-xs btn-primary gap-1.5">
+                            <PenToolIcon className="size-3" /> Share to meeting
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Bottom control bar ── */}
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-6 pt-4"
+                    style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%)' }}
+                  >
+                    <div className="pointer-events-auto flex items-center justify-center gap-3">
+                      {/* Mic */}
+                      <button
+                        onClick={toggleInCallMicrophone}
+                        title={isInCallMicEnabled ? 'Mute' : 'Unmute'}
+                        className={`flex size-12 items-center justify-center rounded-full transition-all focus:outline-none
+                          ${isInCallMicEnabled
+                            ? 'bg-white/15 text-white hover:bg-white/25'
+                            : 'bg-red-500 text-white hover:bg-red-600'}`}
+                      >
+                        {isInCallMicEnabled ? <MicIcon className="size-5" /> : <MicOffIcon className="size-5" />}
+                      </button>
+
+                      {/* Camera */}
+                      {callType === 'video' && (
+                        <button
+                          onClick={toggleInCallCamera}
+                          title={isInCallCamEnabled ? 'Camera off' : 'Camera on'}
+                          className={`flex size-12 items-center justify-center rounded-full transition-all focus:outline-none
+                            ${isInCallCamEnabled
+                              ? 'bg-white/15 text-white hover:bg-white/25'
+                              : 'bg-red-500 text-white hover:bg-red-600'}`}
+                        >
+                          {isInCallCamEnabled ? <VideoIcon className="size-5" /> : <VideoOffIcon className="size-5" />}
+                        </button>
+                      )}
+
+                      {/* Screen share */}
+                      <InCallScreenShareButton />
+
+                      {/* Whiteboard */}
+                      <button
+                        onClick={() => {
+                          if (activeStageTab === 'whiteboard') {
+                            setActiveStageTab('meeting');
+                          } else {
+                            setShowWhiteboardPopup(true);
+                            if (isWhiteboardShared) setActiveStageTab('whiteboard');
+                          }
+                        }}
+                        title="Whiteboard"
+                        className={`flex size-12 items-center justify-center rounded-full transition-all focus:outline-none
+                          ${activeStageTab === 'whiteboard' || showWhiteboardPopup
+                            ? 'bg-violet-500 text-white hover:bg-violet-600'
+                            : 'bg-white/15 text-white hover:bg-white/25'}`}
+                      >
+                        <PenToolIcon className="size-5" />
+                      </button>
+
+                      {/* Recording */}
+                      <InCallRecordingButton onStateChange={handleRecordingStateChange} />
+
+                      {/* Chat */}
+                      <button
+                        onClick={() => { setIsSidebarOpen((v) => activeSidebarTab === 'chat' ? !v : true); setActiveSidebarTab('chat'); }}
+                        title="Chat"
+                        className={`flex size-12 items-center justify-center rounded-full transition-all focus:outline-none
+                          ${isSidebarOpen && activeSidebarTab === 'chat'
+                            ? 'bg-blue-500 text-white hover:bg-blue-600'
+                            : 'bg-white/15 text-white hover:bg-white/25'}`}
+                      >
+                        <MessageSquareIcon className="size-5" />
+                      </button>
+
+                      {/* Participants */}
+                      <button
+                        onClick={() => { setIsSidebarOpen((v) => activeSidebarTab === 'participants' ? !v : true); setActiveSidebarTab('participants'); }}
+                        title="Participants"
+                        className={`flex size-12 items-center justify-center rounded-full transition-all focus:outline-none
+                          ${isSidebarOpen && activeSidebarTab === 'participants'
+                            ? 'bg-blue-500 text-white hover:bg-blue-600'
+                            : 'bg-white/15 text-white hover:bg-white/25'}`}
+                      >
+                        <UsersIcon className="size-5" />
+                      </button>
+
+                      {/* Transcript */}
+                      <button
+                        onClick={() => { setIsSidebarOpen((v) => activeSidebarTab === 'transcript' ? !v : true); setActiveSidebarTab('transcript'); }}
+                        title="Transcript"
+                        className={`relative flex size-12 items-center justify-center rounded-full transition-all focus:outline-none
+                          ${isSidebarOpen && activeSidebarTab === 'transcript'
+                            ? 'bg-blue-500 text-white hover:bg-blue-600'
+                            : 'bg-white/15 text-white hover:bg-white/25'}`}
+                      >
+                        <FileTextIcon className="size-5" />
+                        {isTranscribing && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-emerald-400 ring-1 ring-black" />}
+                      </button>
+
+                      {/* Invite back */}
+                      <InCallInviteBackButton members={meetingRoster} onInvite={handleInviteMembersAgain} />
+
+                      {/* Divider */}
+                      <span className="h-8 w-px bg-white/15 mx-1" />
+
+                      {/* Leave */}
+                      <button onClick={leaveCurrentCall} title="Leave call"
+                        className="flex h-12 items-center gap-2 rounded-full bg-red-500 px-5 text-sm font-semibold text-white transition-all hover:bg-red-600 focus:outline-none"
+                      >
+                        <PhoneOffIcon className="size-4" /> Leave
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                <div className="grid min-h-0 flex-1 xl:grid-cols-[minmax(0,1fr)_320px]">
-                  <div className="flex min-h-0 flex-col p-3 sm:p-4">
-                    <div className="flex items-center justify-between rounded-t-2xl border border-b-0 border-base-300 bg-base-100 px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setActiveStageTab('meeting')}
-                          className={`btn btn-sm gap-2 ${activeStageTab === 'meeting' ? 'btn-primary' : 'btn-ghost'}`}
-                        >
-                          <MonitorUpIcon className="size-4" /> Meeting Stage
-                        </button>
-                        <button
-                          onClick={() => isWhiteboardShared && setActiveStageTab('whiteboard')}
-                          disabled={!isWhiteboardShared}
-                          className={`btn btn-sm gap-2 ${activeStageTab === 'whiteboard' ? 'btn-primary' : 'btn-ghost'} ${!isWhiteboardShared ? 'btn-disabled' : ''}`}
-                        >
-                          <PenToolIcon className="size-4" /> {isWhiteboardShared ? 'Shared Whiteboard' : 'Whiteboard on demand'}
-                        </button>
-                        {isWhiteboardShared && (
-                          <span className="rounded-full bg-base-200 px-3 py-1 text-xs font-semibold text-base-content/65">
-                            Shared by {isSharedBoardOwner ? 'you' : sharedWhiteboardOwnerName || 'participant'}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {isWhiteboardShared && isSharedBoardOwner ? (
-                          <button onClick={toggleSharedWhiteboardCollaboration} className={`btn btn-sm gap-2 ${isSharedWhiteboardCollaborative ? 'btn-secondary' : 'btn-ghost'}`}>
-                            <PenToolIcon className="size-4" /> {isSharedWhiteboardCollaborative ? 'Others can edit' : 'View only for others'}
-                          </button>
-                        ) : null}
-
-                        {isWhiteboardShared && isSharedBoardOwner ? (
-                          <button onClick={stopWhiteboardShare} className="btn btn-ghost btn-sm gap-2 text-error">
-                            <PenToolIcon className="size-4" /> Stop whiteboard
-                          </button>
-                        ) : !isWhiteboardShared ? (
-                          <button onClick={shareWhiteboard} className="btn btn-primary btn-sm gap-2">
-                            <PenToolIcon className="size-4" /> Share whiteboard
-                          </button>
-                        ) : null}
-
-                        {isWhiteboardShared && activeStageTab === 'whiteboard' && (
-                          <>
-                            {isSharedBoardOwner && (
-                              <button onClick={clearWhiteboard} className="btn btn-ghost btn-sm btn-square" title="Clear whiteboard">
-                                <Trash2Icon className="size-4" />
-                              </button>
-                            )}
-                            <button onClick={() => setShowWhiteboardPopup(true)} className="btn btn-ghost btn-sm btn-square" title="Open whiteboard popup">
-                              <MonitorUpIcon className="size-4" />
-                            </button>
-                            {isSharedBoardOwner && (
-                              <button
-                                onClick={() => {
-                                  const blob = new Blob([JSON.stringify(whiteboardStrokes, null, 2)], { type: 'application/json' });
-                                  const url = URL.createObjectURL(blob);
-                                  const link = document.createElement('a');
-                                  link.href = url;
-                                  link.download = `whiteboard-${callId}.json`;
-                                  link.click();
-                                  URL.revokeObjectURL(url);
-                                }}
-                                className="btn btn-ghost btn-sm btn-square"
-                                title="Export whiteboard"
-                              >
-                                <DownloadIcon className="size-4" />
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="relative min-h-0 flex-1 overflow-hidden rounded-b-2xl border border-base-300 bg-white shadow-sm">
-                      {activeStageTab === 'whiteboard' ? (
-                        showWhiteboardPopup ? (
-                          <div className="flex h-full items-center justify-center bg-base-100 px-6 text-center text-base-content/55">
-                            <div>
-                              <PenToolIcon className="mx-auto mb-3 size-8 text-primary" />
-                              <p className="font-semibold">Whiteboard opened in popup</p>
-                              <p className="mt-1 text-sm">Use the larger workspace for sketching while keeping chat beside the meeting.</p>
-                            </div>
-                          </div>
-                        ) : (
-                          <div ref={whiteboardScrollRef} className="h-full overflow-auto bg-[#fbfcff] p-4">
-                            <div
-                              ref={whiteboardRef}
-                              className={`relative rounded-[28px] border border-base-300 bg-white shadow-inner touch-none ${canEditSharedWhiteboard ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
-                              style={{ width: `${boardSize.width}px`, height: `${boardSize.height}px` }}
-                              onPointerDown={startDrawing}
-                              onPointerMove={continueDrawing}
-                              onPointerUp={stopDrawing}
-                              onPointerLeave={stopDrawing}
-                            >
-                              <div
-                                className="absolute inset-0 opacity-40"
-                                style={{
-                                  backgroundImage: 'radial-gradient(circle, rgba(148,163,184,0.25) 1px, transparent 1px)',
-                                  backgroundSize: '22px 22px',
-                                }}
-                              />
-                              <svg className="pointer-events-none absolute inset-0 h-full w-full">
-                                {renderedStrokes.map((stroke) => (
-                                  <path
-                                    key={stroke.id}
-                                    d={pointsToSvgPath(stroke.points)}
-                                    fill="none"
-                                    stroke={stroke.color}
-                                    strokeWidth={stroke.width}
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                ))}
-                              </svg>
-                              {renderedStrokes.length === 0 && (
-                                <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-center text-base-content/35">
-                                  <div>
-                                    <PenToolIcon className="mx-auto mb-3 size-10" />
-                                    <p className="font-medium">Start drawing on the whiteboard</p>
-                                    <p className="mt-1 text-sm">This canvas expands as you move toward the edges.</p>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      ) : (
-                        <div className="relative h-full overflow-hidden bg-slate-950">
-                          <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs font-medium text-white/80 backdrop-blur-md">
-                            Normal meeting view{isWhiteboardShared ? ` • ${isSharedBoardOwner ? 'Your' : `${sharedWhiteboardOwnerName || 'A participant\'s'}`} whiteboard is ready` : ' • Share a whiteboard or screen when you need it'}
-                          </div>
-                          <SpeakerLayout VideoPlaceholder={CallVideoPlaceholder} />
-                        </div>
-                      )}
-
-                      {isWhiteboardShared && activeStageTab === 'whiteboard' && callType === 'video' && (
-                        <div className="absolute bottom-4 right-4 h-24 w-40 overflow-hidden rounded-2xl border border-white/15 bg-slate-950 shadow-xl">
-                          <SpeakerLayout VideoPlaceholder={CallVideoPlaceholder} />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pointer-events-none absolute inset-x-0 bottom-20 z-20 px-3 sm:bottom-24 sm:px-4">
-                      <div className="pointer-events-auto mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-black/55 p-2 shadow-xl backdrop-blur-md sm:gap-3 sm:px-4">
-                        <button
-                          onClick={toggleInCallMicrophone}
-                          className={`btn btn-sm gap-2 ${isInCallMicEnabled ? 'btn-primary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
-                        >
-                          {isInCallMicEnabled ? <MicIcon className="size-4" /> : <MicOffIcon className="size-4" />}
-                          {isInCallMicEnabled ? 'Mute' : 'Unmute'}
-                        </button>
-
-                        {callType === 'video' && (
+                {/* ── Sidebar ── */}
+                {isSidebarOpen && (
+                  <aside className="flex flex-col overflow-hidden border-l border-white/[0.07] bg-[#161820]">
+                    {/* Sidebar header */}
+                    <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
+                      <div className="flex gap-1 rounded-xl bg-white/5 p-1">
+                        {[
+                          { id: 'chat', icon: <MessageSquareIcon className="size-3.5" />, label: 'Chat' },
+                          { id: 'participants', icon: <UsersIcon className="size-3.5" />, label: `People` },
+                          { id: 'transcript', icon: <FileTextIcon className="size-3.5" />, label: 'Transcript' },
+                        ].map((tab) => (
                           <button
-                            onClick={toggleInCallCamera}
-                            className={`btn btn-sm gap-2 ${isInCallCamEnabled ? 'btn-primary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
+                            key={tab.id}
+                            onClick={() => setActiveSidebarTab(tab.id)}
+                            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors
+                              ${activeSidebarTab === tab.id ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/70'}`}
                           >
-                            {isInCallCamEnabled ? <VideoIcon className="size-4" /> : <VideoOffIcon className="size-4" />}
-                            {isInCallCamEnabled ? 'Camera on' : 'Camera off'}
+                            {tab.id === 'transcript' && isTranscribing
+                              ? <span className="inline-flex size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              : tab.icon}
+                            {tab.label}
                           </button>
-                        )}
-
-                        <InCallRecordingButton onStateChange={handleRecordingStateChange} />
-
-                        <button
-                          onClick={() => {
-                            setIsSidebarOpen(true);
-                            setActiveSidebarTab('chat');
-                          }}
-                          className={`btn btn-sm gap-2 ${isSidebarOpen && activeSidebarTab === 'chat' ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
-                        >
-                          <MessageSquareIcon className="size-4" /> Chat
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            setIsSidebarOpen(true);
-                            setActiveSidebarTab('participants');
-                          }}
-                          className={`btn btn-sm gap-2 ${isSidebarOpen && activeSidebarTab === 'participants' ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
-                        >
-                          <UsersIcon className="size-4" /> Participants
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            setIsSidebarOpen(true);
-                            setActiveSidebarTab('transcript');
-                          }}
-                          className={`btn btn-sm gap-2 ${isSidebarOpen && activeSidebarTab === 'transcript' ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
-                        >
-                          <FileTextIcon className="size-4" />
-                          {isTranscribing && <span className="inline-flex size-1.5 rounded-full bg-success animate-pulse" />}
-                          Transcript
-                        </button>
-
-                        <InCallScreenShareButton />
-
-                        <InCallInviteBackButton members={meetingRoster} onInvite={handleInviteMembersAgain} />
-
-                        <button
-                          onClick={() => {
-                            setShowWhiteboardPopup(true);
-                            if (isWhiteboardShared) {
-                              setActiveStageTab('whiteboard');
-                            }
-                          }}
-                          className={`btn btn-sm gap-2 ${showWhiteboardPopup ? 'btn-secondary' : 'btn-outline border-white/20 text-white hover:bg-white/10'}`}
-                        >
-                          <PenToolIcon className="size-4" /> {isWhiteboardShared ? 'Open whiteboard' : 'Personal board'}
-                        </button>
-
-                        <button onClick={leaveCurrentCall} className="btn btn-error btn-sm gap-2">
-                          <PhoneOffIcon className="size-4" /> Leave call
-                        </button>
+                        ))}
                       </div>
-                    </div>
-
-                    <div className="mt-auto flex gap-3 overflow-x-auto px-1 pt-4">
-                      {meetingRoster.map((member) => (
-                        <div key={member.id} className="min-w-[132px] rounded-2xl border border-base-300 bg-base-100 p-2 shadow-sm">
-                          <div className="flex items-center gap-2">
-                            <Avatar src={member.image} name={member.name} size="w-10 h-10" />
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold">{member.isYou ? 'You' : member.name}</p>
-                              <p className="text-[11px] text-base-content/50">{member.isYou ? 'Local preview' : 'In meeting'}</p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {isSidebarOpen && (
-                    <aside className="flex min-h-0 w-full flex-col border-t border-base-200 bg-base-100 xl:border-l xl:border-t-0">
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-base-200 px-4 py-4">
-                        <div className="tabs tabs-boxed bg-base-200/70 p-1">
-                          <button
-                            onClick={() => setActiveSidebarTab('chat')}
-                            className={`tab tab-sm ${activeSidebarTab === 'chat' ? 'tab-active' : ''}`}
-                          >
-                            In-Meet Chat
-                          </button>
-                          <button
-                            onClick={() => setActiveSidebarTab('participants')}
-                            className={`tab tab-sm ${activeSidebarTab === 'participants' ? 'tab-active' : ''}`}
-                          >
-                            Participants ({meetingRoster.length})
-                          </button>
-                          <button
-                            onClick={() => setActiveSidebarTab('transcript')}
-                            className={`tab tab-sm ${activeSidebarTab === 'transcript' ? 'tab-active' : ''}`}
-                          >
-                            <span className="flex items-center gap-1">
-                              {isTranscribing && <span className="inline-flex size-1.5 rounded-full bg-success animate-pulse" />}
-                              Transcript
-                            </span>
-                          </button>
-                      </div>
-                      <button onClick={() => setIsSidebarOpen(false)} className="btn btn-ghost btn-sm btn-circle self-start">
+                      <button onClick={() => setIsSidebarOpen(false)} className="flex size-7 items-center justify-center rounded-lg text-white/40 hover:bg-white/10 hover:text-white transition-colors">
                         <XIcon className="size-4" />
                       </button>
                     </div>
 
+                    {/* Sidebar body */}
                     <div className="flex min-h-0 flex-1 flex-col">
-                        {activeSidebarTab === 'chat' ? (
-                          <>
-                            <div className="max-h-[28vh] flex-1 space-y-3 overflow-y-auto px-4 py-4 xl:max-h-none">
-                              {chatMessages.length === 0 ? (
-                                <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/50 p-6 text-center">
-                                  <MessageSquareIcon className="mx-auto mb-3 size-8 text-base-content/25" />
-                                  <p className="font-medium text-base-content/70">No messages yet</p>
-                                  <p className="mt-1 text-sm text-base-content/50">Share links, notes, or quick decisions during the call.</p>
+                      {activeSidebarTab === 'chat' ? (
+                        <>
+                          <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+                            {chatMessages.length === 0 ? (
+                              <div className="flex h-full flex-col items-center justify-center py-12 text-center">
+                                <div className="flex size-14 items-center justify-center rounded-2xl bg-white/5 mb-4">
+                                  <MessageSquareIcon className="size-6 text-white/30" />
                                 </div>
-                              ) : (
-                                chatMessages.map((message) => {
-                                  const isOwn = message.userId === user._id;
-                                  return (
-                                    <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                                      <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${isOwn ? 'bg-primary text-primary-content' : 'bg-base-200 text-base-content'}`}>
-                                        <p className={`text-[11px] font-semibold uppercase tracking-wide ${isOwn ? 'text-primary-content/70' : 'text-base-content/45'}`}>
-                                          {isOwn ? 'Me' : message.userName}
-                                        </p>
-                                        <p className="mt-1 whitespace-pre-wrap break-words text-sm">{message.text}</p>
-                                      </div>
+                                <p className="text-sm font-medium text-white/50">No messages yet</p>
+                                <p className="mt-1 text-xs text-white/30">Share links, notes or quick decisions.</p>
+                              </div>
+                            ) : (
+                              chatMessages.map((message) => {
+                                const isOwn = message.userId === user._id;
+                                return (
+                                  <div key={message.id} className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+                                    <span className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+                                      {isOwn ? 'You' : message.userName}
+                                    </span>
+                                    <div className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm ${isOwn ? 'bg-blue-600 text-white' : 'bg-white/10 text-white/90'}`}>
+                                      {message.text}
                                     </div>
-                                  );
-                                })
-                              )}
-                              <div ref={messagesEndRef} />
-                            </div>
-
-                            <div className="border-t border-base-200 p-4">
-                              <div className="flex items-end gap-2">
-                                <textarea
-                                  value={chatInput}
-                                  onChange={(event) => setChatInput(event.target.value)}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter' && !event.shiftKey) {
-                                      event.preventDefault();
-                                      handleSendChatMessage();
-                                    }
-                                  }}
-                                  className="textarea textarea-bordered min-h-[88px] flex-1 resize-none"
-                                  placeholder="Type a message..."
-                                />
-                                <button onClick={handleSendChatMessage} className="btn btn-primary btn-square">
-                                  <SendIcon className="size-4" />
-                                </button>
-                              </div>
-                            </div>
-                          </>
-                        ) : activeSidebarTab === 'transcript' ? (
-                          <>
-                            <div className="flex items-center justify-between border-b border-base-200 px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <span className={`inline-flex size-2 rounded-full ${isTranscribing ? 'bg-success animate-pulse' : 'bg-base-300'}`} />
-                                <span className="text-sm font-medium text-base-content/70">
-                                  {isTranscribing ? 'Live transcription on' : 'Transcription paused'}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={isTranscribing ? stopTranscription : startTranscription}
-                                  className={`btn btn-xs ${isTranscribing ? 'btn-error' : 'btn-primary'}`}
-                                >
-                                  {isTranscribing ? 'Pause' : 'Resume'}
-                                </button>
-                                  <button
-                                    onClick={downloadTranscript}
-                                    disabled={isDownloadingTranscript}
-                                    className="btn btn-xs btn-ghost gap-1"
-                                    title="Download transcript as text"
-                                  >
-                                    <DownloadIcon className="size-3" />
-                                    {isDownloadingTranscript ? "Saving..." : "Save"}
-                                  </button>
-                              </div>
-                            </div>
-                            <div className="max-h-[28vh] flex-1 space-y-4 overflow-y-auto px-4 py-4 xl:max-h-none">
-                              {transcriptEntries.length === 0 && !transcriptDraft ? (
-                                <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/50 p-6 text-center">
-                                  <FileTextIcon className="mx-auto mb-3 size-8 text-base-content/25" />
-                                  <p className="font-medium text-base-content/70">No transcript yet</p>
-                                  <p className="mt-1 text-sm text-base-content/50">
-                                    {(window.SpeechRecognition || window.webkitSpeechRecognition)
-                                      ? 'Start speaking — words appear here in real time for all participants.'
-                                      : 'Live transcription requires Chrome or Edge browser.'}
-                                  </p>
-                                </div>
-                              ) : (
-                                <>
-                                  {transcriptEntries.map((entry) => (
-                                    <div key={entry.id} className="space-y-1">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-xs font-semibold text-primary">
-                                          {entry.speakerId === user._id ? 'You' : entry.speakerName}
-                                        </span>
-                                        <span className="text-[10px] text-base-content/40">
-                                          {new Date(entry.timestamp).toLocaleTimeString()}
-                                        </span>
-                                      </div>
-                                      <p className="text-sm leading-relaxed text-base-content/80">{entry.text}</p>
-                                    </div>
-                                  ))}
-                                  {transcriptDraft && (
-                                    <div className="space-y-1 opacity-55">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-xs font-semibold text-primary">You</span>
-                                        <span className="text-[10px] italic text-base-content/40">speaking…</span>
-                                      </div>
-                                      <p className="text-sm italic leading-relaxed text-base-content/60">{transcriptDraft}</p>
-                                    </div>
-                                  )}
-                                  <div ref={transcriptEndRef} />
-                                </>
-                              )}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex-1 overflow-y-auto px-4 py-4">
-                            <div className="space-y-3">
-                              <div className="rounded-2xl border border-dashed border-base-300 bg-base-200/45 p-3 text-sm text-base-content/60">
-                                Anyone who leaves early can be invited back from here.
-                              </div>
-                              {meetingRoster.map((member, index) => (
-                                <div key={`${member.id}-${index}`} className="flex items-center gap-3 rounded-2xl border border-base-300 bg-base-100 px-3 py-3 shadow-sm">
-                                  <Avatar src={member.image} name={member.name} size="w-10 h-10" />
-                                  <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-semibold">{member.isYou ? 'You' : member.name}</p>
-                                    <p className="text-xs text-base-content/50">{member.isYou ? 'Organizer view' : 'Connected participant'}</p>
                                   </div>
-                                  {!member.isYou && (
-                                    <button
-                                      onClick={() => handleInviteMembersAgain([member])}
-                                      className="btn btn-ghost btn-sm"
-                                      title={`Invite ${member.name} back`}
-                                    >
-                                      Invite back
-                                    </button>
-                                  )}
-                                </div>
-                              ))}
+                                );
+                              })
+                            )}
+                            <div ref={messagesEndRef} />
+                          </div>
+                          <div className="border-t border-white/[0.07] p-3">
+                            <div className="flex items-end gap-2">
+                              <textarea
+                                value={chatInput}
+                                onChange={(e) => setChatInput(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChatMessage(); }}}
+                                className="min-h-[72px] flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:border-blue-500/50 focus:bg-white/8 focus:outline-none"
+                                placeholder="Message…"
+                              />
+                              <button onClick={handleSendChatMessage}
+                                className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                              >
+                                <SendIcon className="size-4" />
+                              </button>
                             </div>
                           </div>
-                        )}
+                        </>
+                      ) : activeSidebarTab === 'transcript' ? (
+                        <>
+                          <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex size-2 rounded-full ${isTranscribing ? 'bg-emerald-400 animate-pulse' : 'bg-white/20'}`} />
+                              <span className="text-xs font-medium text-white/50">
+                                {isTranscribing ? 'Transcribing live' : 'Paused'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={isTranscribing ? stopTranscription : startTranscription}
+                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${isTranscribing ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'}`}
+                              >
+                                {isTranscribing ? 'Pause' : 'Resume'}
+                              </button>
+                              {transcriptEntries.length > 0 && (
+                                <button onClick={downloadTranscript} className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs text-white/40 hover:text-white hover:bg-white/10 transition-colors">
+                                  <DownloadIcon className="size-3" /> Save
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+                            {transcriptEntries.length === 0 && !transcriptDraft ? (
+                              <div className="flex flex-col items-center justify-center py-12 text-center">
+                                <div className="flex size-14 items-center justify-center rounded-2xl bg-white/5 mb-4">
+                                  <FileTextIcon className="size-6 text-white/30" />
+                                </div>
+                                <p className="text-sm font-medium text-white/50">No transcript yet</p>
+                                <p className="mt-1 text-xs text-white/30">
+                                  {(window.SpeechRecognition || window.webkitSpeechRecognition)
+                                    ? 'Speak and words appear here in real time.'
+                                    : 'Requires Chrome or Edge browser.'}
+                                </p>
+                              </div>
+                            ) : (
+                              <>
+                                {transcriptEntries.map((entry) => (
+                                  <div key={entry.id}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="text-[11px] font-semibold text-blue-400">
+                                        {entry.speakerId === user._id ? 'You' : entry.speakerName}
+                                      </span>
+                                      <span className="text-[10px] text-white/25">
+                                        {new Date(entry.timestamp).toLocaleTimeString()}
+                                      </span>
+                                    </div>
+                                    <p className="text-sm leading-relaxed text-white/75">{entry.text}</p>
+                                  </div>
+                                ))}
+                                {transcriptDraft && (
+                                  <div className="opacity-50">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="text-[11px] font-semibold text-blue-400">You</span>
+                                      <span className="text-[10px] italic text-white/25">speaking…</span>
+                                    </div>
+                                    <p className="text-sm italic leading-relaxed text-white/55">{transcriptDraft}</p>
+                                  </div>
+                                )}
+                                <div ref={transcriptEndRef} />
+                              </>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+                          <p className="mb-3 text-xs text-white/30">
+                            {meetingRoster.length} participant{meetingRoster.length !== 1 ? 's' : ''}
+                          </p>
+                          {meetingRoster.map((member, index) => (
+                            <div key={`${member.id}-${index}`} className="flex items-center gap-3 rounded-xl p-2 hover:bg-white/5 transition-colors">
+                              <Avatar src={member.image} name={member.name} size="w-9 h-9" />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-medium text-white/85">{member.isYou ? 'You' : member.name}</p>
+                                <p className="text-[11px] text-white/35">{member.isYou ? 'You (local)' : 'In call'}</p>
+                              </div>
+                              {!member.isYou && (
+                                <button
+                                  onClick={() => handleInviteMembersAgain([member])}
+                                  className="rounded-lg px-2.5 py-1 text-xs text-white/40 hover:bg-white/10 hover:text-white transition-colors"
+                                >
+                                  Invite back
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </aside>
                 )}
@@ -1884,41 +1821,52 @@ const VideoCallModal = ({
                   </div>
                 </div>
               )}
-              </div>
+            </div>
             </StreamCall>
           </StreamVideo>
         ) : (
-          <div className="flex h-full items-center justify-center">
-            <div className="grid h-full w-full max-w-5xl gap-0 overflow-hidden border border-base-300 bg-base-100 shadow-2xl sm:rounded-3xl lg:h-auto lg:grid-cols-[1.1fr_0.9fr] lg:gap-6">
-              <div className="relative flex min-h-[300px] items-center justify-center bg-neutral text-neutral-content sm:min-h-[420px]">
+          /* ── Pre-join screen ── */
+          <div className="flex h-full w-full items-center justify-center bg-[#0d0f13] p-4">
+            <div className="grid h-full w-full max-w-5xl overflow-hidden rounded-2xl border border-white/[0.07] bg-[#161820] shadow-2xl lg:h-auto lg:grid-cols-[1.1fr_0.9fr]">
+              {/* Left: camera preview */}
+              <div className="relative flex min-h-[260px] items-center justify-center overflow-hidden bg-[#0a0b0e] sm:min-h-[400px]">
                 {callType === 'video' && previewStream ? (
                   <video
                     ref={previewVideoRef}
                     autoPlay
                     muted
                     playsInline
-                    className="w-full h-full object-cover scale-x-[-1]"
+                    className="h-full w-full object-cover scale-x-[-1]"
                   />
                 ) : (
                   <div className="text-center px-8">
-                    {callType === 'video' ? <VideoOffIcon className="size-16 mx-auto mb-4 opacity-60" /> : <MicIcon className="size-16 mx-auto mb-4 opacity-60" />}
-                    <p className="text-lg font-semibold">{callType === 'video' ? 'Camera preview is off' : 'Voice call ready'}</p>
-                    <p className="text-sm opacity-70 mt-2">{previewError || 'Choose how you want to join before entering the call.'}</p>
+                    {callType === 'video'
+                      ? <VideoOffIcon className="size-14 mx-auto mb-4 text-white/30" />
+                      : <MicIcon className="size-14 mx-auto mb-4 text-white/30" />}
+                    <p className="text-base font-semibold text-white/70">
+                      {callType === 'video' ? 'Camera preview is off' : 'Voice call ready'}
+                    </p>
+                    <p className="text-sm text-white/35 mt-2">
+                      {previewError || 'Choose how you want to join before entering the call.'}
+                    </p>
                   </div>
                 )}
-                <div className="absolute left-4 bottom-4 flex gap-2">
+                {/* Preview mic/cam toggles */}
+                <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-3">
                   <button
                     onClick={() => setIsMicEnabled((v) => !v)}
-                    className={`btn btn-circle ${isMicEnabled ? 'btn-primary' : 'btn-ghost bg-black/30 text-white border-white/20'}`}
                     title={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
+                    className={`flex size-11 items-center justify-center rounded-full transition-all focus:outline-none
+                      ${isMicEnabled ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-red-500 text-white hover:bg-red-600'}`}
                   >
                     {isMicEnabled ? <MicIcon className="size-5" /> : <MicOffIcon className="size-5" />}
                   </button>
                   {callType === 'video' && (
                     <button
                       onClick={() => setIsCamEnabled((v) => !v)}
-                      className={`btn btn-circle ${isCamEnabled ? 'btn-primary' : 'btn-ghost bg-black/30 text-white border-white/20'}`}
                       title={isCamEnabled ? 'Turn camera off' : 'Turn camera on'}
+                      className={`flex size-11 items-center justify-center rounded-full transition-all focus:outline-none
+                        ${isCamEnabled ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-red-500 text-white hover:bg-red-600'}`}
                     >
                       {isCamEnabled ? <VideoIcon className="size-5" /> : <VideoOffIcon className="size-5" />}
                     </button>
@@ -1926,80 +1874,88 @@ const VideoCallModal = ({
                 </div>
               </div>
 
-              <div className="flex flex-col justify-center p-5 sm:p-8">
-                <div className="badge badge-outline mb-4 w-fit">{callType === 'video' ? 'Video Call' : 'Voice Call'}</div>
-                <h2 className="text-2xl font-bold text-base-content sm:text-3xl">Ready to join?</h2>
-                <p className="mt-3 text-base-content/60">
-                  You are about to join with {isMicEnabled ? 'microphone on' : 'microphone off'}{callType === 'video' ? ` and ${isCamEnabled ? 'camera on' : 'camera off'}` : ''}.
+              {/* Right: join settings */}
+              <div className="flex flex-col justify-center overflow-y-auto p-6 sm:p-8">
+                <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/50 mb-4">
+                  {callType === 'video' ? 'Video Call' : 'Voice Call'}
+                </span>
+                <h2 className="text-2xl font-bold text-white sm:text-3xl">Ready to join?</h2>
+                <p className="mt-2 text-sm text-white/45">
+                  Joining with {isMicEnabled ? 'microphone on' : 'microphone off'}
+                  {callType === 'video' ? ` · camera ${isCamEnabled ? 'on' : 'off'}` : ''}.
                 </p>
 
-                <div className="mt-6 space-y-3">
-                  <div className="rounded-2xl bg-base-200 px-4 py-3">
-                    <p className="text-xs uppercase tracking-wide text-base-content/50">Participants</p>
-                    <p className="mt-1 font-medium text-base-content">{participantNames.length ? participantNames.join(', ') : 'Team call'}</p>
+                <div className="mt-5 space-y-2.5">
+                  <div className="rounded-xl bg-white/[0.05] border border-white/[0.06] px-4 py-3">
+                    <p className="text-[10px] uppercase tracking-wider text-white/35">Participants</p>
+                    <p className="mt-1 text-sm font-medium text-white/80">{participantNames.length ? participantNames.join(', ') : 'Team call'}</p>
                   </div>
-                  <div className="rounded-2xl bg-base-200 px-4 py-3">
-                    <p className="text-xs uppercase tracking-wide text-base-content/50">Status</p>
-                    <p className="mt-1 font-medium text-base-content">{isInitiator ? 'Starting a ringing call' : 'Joining an incoming call'}</p>
+                  <div className="rounded-xl bg-white/[0.05] border border-white/[0.06] px-4 py-3">
+                    <p className="text-[10px] uppercase tracking-wider text-white/35">Status</p>
+                    <p className="mt-1 text-sm font-medium text-white/80">{isInitiator ? 'Starting a ringing call' : 'Joining an incoming call'}</p>
                   </div>
-                  <div className="rounded-2xl bg-base-200 px-4 py-3">
-                    <p className="text-xs uppercase tracking-wide text-base-content/50">Meeting tools</p>
-                    <p className="mt-1 text-sm font-medium text-base-content">Live chat, live transcription, whiteboard on demand, screen sharing, synced recording controls, microphone control, camera control</p>
-                  </div>
-                  <div className="rounded-2xl bg-base-200 px-4 py-3 space-y-3">
-                    <p className="text-xs uppercase tracking-wide text-base-content/50">Devices</p>
-                    <label className="form-control w-full">
-                      <span className="label-text text-xs text-base-content/60 mb-1">Microphone</span>
+                  <div className="rounded-xl bg-white/[0.05] border border-white/[0.06] px-4 py-3 space-y-3">
+                    <p className="text-[10px] uppercase tracking-wider text-white/35">Devices</p>
+                    <div>
+                      <p className="text-xs text-white/40 mb-1">Microphone</p>
                       <select
-                        className="select select-bordered w-full"
+                        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none"
                         value={selectedMicId}
                         onChange={(e) => setSelectedMicId(e.target.value)}
                       >
                         {audioDevices.map((device, index) => (
-                          <option key={device.deviceId || index} value={device.deviceId}>
+                          <option key={device.deviceId || index} value={device.deviceId} className="bg-[#161820]">
                             {device.label || `Microphone ${index + 1}`}
                           </option>
                         ))}
                       </select>
-                    </label>
+                    </div>
                     {callType === 'video' && videoDevices.length > 0 && (
-                      <label className="form-control w-full">
-                        <span className="label-text text-xs text-base-content/60 mb-1">Camera</span>
+                      <div>
+                        <p className="text-xs text-white/40 mb-1">Camera</p>
                         <select
-                          className="select select-bordered w-full"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none"
                           value={selectedCameraId}
                           onChange={(e) => setSelectedCameraId(e.target.value)}
                         >
                           {videoDevices.map((device, index) => (
-                            <option key={device.deviceId || index} value={device.deviceId}>
+                            <option key={device.deviceId || index} value={device.deviceId} className="bg-[#161820]">
                               {device.label || `Camera ${index + 1}`}
                             </option>
                           ))}
                         </select>
-                      </label>
+                      </div>
                     )}
                     {speakerDevices.length > 0 && (
-                      <label className="form-control w-full">
-                        <span className="label-text text-xs text-base-content/60 mb-1">Speaker / Output</span>
+                      <div>
+                        <p className="text-xs text-white/40 mb-1">Speaker / Output</p>
                         <select
-                          className="select select-bordered w-full"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none"
                           value={selectedSpeakerId}
                           onChange={(e) => setSelectedSpeakerId(e.target.value)}
                         >
                           {speakerDevices.map((device, index) => (
-                            <option key={device.deviceId || index} value={device.deviceId}>
+                            <option key={device.deviceId || index} value={device.deviceId} className="bg-[#161820]">
                               {device.label || `Speaker ${index + 1}`}
                             </option>
                           ))}
                         </select>
-                      </label>
+                      </div>
                     )}
                   </div>
                 </div>
 
-                <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                  <button onClick={onClose} className="btn btn-ghost flex-1">Cancel</button>
-                  <button onClick={joinCall} className={`btn btn-primary flex-1 ${isJoining ? 'btn-disabled' : ''}`}>
+                <div className="mt-6 flex gap-3">
+                  <button onClick={onClose}
+                    className="flex-1 rounded-xl border border-white/10 bg-white/5 py-3 text-sm font-semibold text-white/60 hover:bg-white/10 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={joinCall}
+                    disabled={isJoining}
+                    className="flex-1 rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                  >
                     {isJoining ? 'Joining…' : 'Join now'}
                   </button>
                 </div>
@@ -2007,7 +1963,6 @@ const VideoCallModal = ({
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 };
