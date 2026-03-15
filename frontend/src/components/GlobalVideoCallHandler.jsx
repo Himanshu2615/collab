@@ -40,10 +40,15 @@ const GlobalVideoCallHandler = () => {
   useEffect(() => { incomingCallRef.current = incomingCall; }, [incomingCall]);
 
   const buildIncomingCallFromEvent = (event) => {
-    if (!event?.call_cid) return null;
+    const callCid = event?.call_cid || event?.call?.cid || null;
+    const callId = event?.call?.id || (callCid ? callCid.split(':')[1] : null) || callCid;
+    if (!callId) return null;
 
-    const callId = event.call?.id || event.call_cid.split(':')[1] || event.call_cid;
-    const members = Array.isArray(event.members) ? event.members : [];
+    const members = Array.isArray(event.members)
+      ? event.members
+      : Array.isArray(event.call?.members)
+      ? event.call.members
+      : [];
     const createdBy = event.call?.created_by || event.created_by || null;
     const creator = createdBy?.id ? createdBy : (event.user?.id ? event.user : null);
     const callerUserId = creator?.id || null;
@@ -156,6 +161,8 @@ const GlobalVideoCallHandler = () => {
 
     const unsubscribeRing = videoClient.on('call.ring', handleIncomingRingEvent);
     const unsubscribeNotification = videoClient.on('call.notification', handleIncomingRingEvent);
+    const unsubscribeCreated = videoClient.on('call.created', handleIncomingRingEvent);
+    const unsubscribeMemberJoined = videoClient.on('call.member_added', handleIncomingRingEvent);
 
     const handleCallMissedEvent = (event) => {
       console.log("[GlobalVideoCallHandler] Received call.missed event:", event.call?.id);
@@ -231,6 +238,8 @@ const GlobalVideoCallHandler = () => {
     return () => {
       unsubscribeRing?.();
       unsubscribeNotification?.();
+      unsubscribeCreated?.();
+      unsubscribeMemberJoined?.();
       unsubscribeMissed?.();
       unsubscribeReject?.();
       unsubscribeAccept?.();

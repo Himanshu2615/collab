@@ -4,7 +4,7 @@ import Avatar from './Avatar';
 
 const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, callerImage, callType = 'video', ringtoneVolume = 0.6, vibrate = true }) => {
   const [ringingTime, setRingingTime] = useState(0);
-  const [canPlayAlert, setCanPlayAlert] = useState(false);
+  const [canPlayAlert, setCanPlayAlert] = useState(true);
   const audioContextRef = useRef(null);
 
   useEffect(() => {
@@ -31,7 +31,7 @@ const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, cal
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || !canPlayAlert) return;
+    if (!isOpen) return;
 
     const playTone = () => {
       try {
@@ -87,7 +87,7 @@ const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, cal
 
   useEffect(() => {
     if (!isOpen) {
-      setCanPlayAlert(false);
+      setCanPlayAlert(true);
     }
   }, [isOpen]);
 
