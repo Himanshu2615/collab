@@ -93,91 +93,68 @@ const IncomingCallNotification = ({ isOpen, onAccept, onDecline, callerName, cal
 
   if (!isOpen) return null;
 
+  const callLabel = callType === 'video' ? 'Incoming video call' : 'Incoming voice call';
+
   return (
-    <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300">
-      <div className="bg-gradient-to-b from-base-100 to-base-200 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
-        {/* Animated background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-success/5 animate-pulse" />
-        
-        {/* Content */}
-        <div className="relative p-8 text-center">
-          {/* Caller Avatar with pulse animation */}
-          <div className="relative mx-auto mb-6">
-            <div className="avatar online">
-              <div className="w-32 rounded-full ring-4 ring-primary ring-offset-4 ring-offset-base-100 animate-pulse">
-                <Avatar src={callerImage} name={callerName} size="w-32 h-32" className="ring-0 shadow-none" />
-              </div>
-            </div>
-            {/* Ripple effect */}
-            <div className="absolute inset-0 rounded-full border-4 border-primary animate-ping opacity-20" />
+    <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300">
+      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/15 bg-gradient-to-b from-base-100 via-base-100 to-base-200 shadow-[0_24px_70px_rgba(0,0,0,0.45)] animate-in zoom-in duration-300">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(16,185,129,0.18),transparent_45%),radial-gradient(circle_at_80%_70%,rgba(59,130,246,0.15),transparent_40%)]" />
+        <div className="relative px-7 pt-7 pb-6 text-center">
+          <div className="mb-5 flex items-center justify-center gap-2">
+            <span className="badge badge-success badge-sm font-semibold">Ringing</span>
+            <span className="badge badge-outline badge-sm border-base-content/20 text-base-content/70">{ringingTime}s</span>
           </div>
 
-          {/* Call Info */}
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold text-base-content mb-2">
-              {callerName}
-            </h2>
-            <div className="flex items-center justify-center gap-2 text-base-content/60">
-              {callType === 'video' ? (
-                <>
-                  <VideoIcon className="size-5" />
-                  <span>Incoming video call</span>
-                </>
-              ) : (
-                <>
-                  <PhoneIcon className="size-5" />
-                  <span>Incoming voice call</span>
-                </>
-              )}
-            </div>
-            <p className="text-sm text-base-content/40 mt-2">
-              {ringingTime}s
-            </p>
-            <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
-              <span className="badge badge-outline gap-1">
-                <Volume2Icon className="size-3.5" />
-                {Math.round(Math.max(0, Math.min(1, ringtoneVolume)) * 100)}%
-              </span>
-              <span className="badge badge-outline gap-1">
-                <SmartphoneIcon className="size-3.5" />
-                {vibrate ? (canPlayAlert ? 'Vibrate on' : 'Vibrate blocked until tap') : 'Vibrate off'}
-              </span>
-              {!canPlayAlert && (
-                <span className="badge badge-outline gap-1">
-                  Tap to enable ringtone
-                </span>
-              )}
+          <div className="relative mx-auto mb-6 grid h-32 w-32 place-items-center">
+            <div className="absolute inset-0 rounded-full bg-success/20 animate-ping" />
+            <div className="absolute inset-1 rounded-full bg-primary/10 animate-pulse" />
+            <div className="relative h-28 w-28 overflow-hidden rounded-full border-4 border-base-100 ring-4 ring-success/60 shadow-xl">
+              <Avatar src={callerImage} name={callerName} size="w-28 h-28" className="block" />
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center justify-center gap-6">
-            {/* Decline Button */}
+          <h2 className="mb-1 text-3xl font-black tracking-tight text-base-content">
+            {callerName}
+          </h2>
+
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-base-content/15 bg-base-100/70 px-3 py-1 text-sm font-medium text-base-content/75">
+            {callType === 'video' ? <VideoIcon className="size-4" /> : <PhoneIcon className="size-4" />}
+            <span>{callLabel}</span>
+          </div>
+
+          <div className="mb-7 flex flex-wrap items-center justify-center gap-2">
+            <span className="badge badge-outline gap-1 border-base-content/20">
+              <Volume2Icon className="size-3.5" />
+              {Math.round(Math.max(0, Math.min(1, ringtoneVolume)) * 100)}% volume
+            </span>
+            <span className="badge badge-outline gap-1 border-base-content/20">
+              <SmartphoneIcon className="size-3.5" />
+              {vibrate ? (canPlayAlert ? 'Vibrate on' : 'Tap to enable alerts') : 'Vibrate off'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <button
               onClick={onDecline}
-              className="btn btn-circle btn-error btn-lg shadow-lg hover:scale-110 transition-transform"
+              className="btn h-12 rounded-2xl border-error/30 bg-error/90 text-white shadow-lg hover:bg-error"
               title="Decline"
             >
-              <XIcon className="size-8" />
+              <XIcon className="size-5" />
+              Decline
             </button>
 
-            {/* Accept Button */}
             <button
               onClick={onAccept}
-              className="btn btn-circle btn-success btn-lg shadow-lg hover:scale-110 transition-transform animate-bounce"
+              className="btn h-12 rounded-2xl border-success/30 bg-success text-white shadow-lg hover:bg-success/90"
               title="Accept"
             >
-              {callType === 'video' ? (
-                <VideoIcon className="size-8" />
-              ) : (
-                <PhoneIcon className="size-8" />
-              )}
+              {callType === 'video' ? <VideoIcon className="size-5" /> : <PhoneIcon className="size-5" />}
+              Accept
             </button>
           </div>
 
-          {/* Hint text */}
-          <p className="text-xs text-base-content/40 mt-6">
-            Press decline to send to voicemail
+          <p className="mt-4 text-xs text-base-content/45">
+            Your microphone and camera permissions may be requested after accept.
           </p>
         </div>
       </div>

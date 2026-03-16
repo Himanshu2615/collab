@@ -19,6 +19,11 @@ const inferIsChannelCall = (conversationId, explicitFlag) => {
   return id.includes(':');
 };
 
+const pickImageFromUser = (user) => {
+  if (!user || typeof user !== 'object') return '';
+  return user.image || user.profilePic || user.image_url || user.avatar_url || '';
+};
+
 /**
  * Mounts once at the app level (inside StreamProvider) and listens for
  * incoming call events regardless of which page the user is on.
@@ -64,6 +69,7 @@ const GlobalVideoCallHandler = () => {
     const callerMember = callerUserId
       ? members.find((member) => member.user_id === callerUserId)
       : null;
+    const firstOtherMember = members.find((member) => member?.user_id && member.user_id !== authUser._id) || null;
 
     if (callerUserId && callerUserId === authUser._id) return null;
 
@@ -79,14 +85,21 @@ const GlobalVideoCallHandler = () => {
     const participantProfiles = members.map((member) => ({
       id: member.user_id,
       name: member.user?.name || member.user_id,
-      image: member.user?.image || member.user?.profilePic || '',
+      image: pickImageFromUser(member.user),
       isYou: member.user_id === authUser._id,
     }));
 
     return {
       callId,
       callerName: callerMember?.user?.name || creator?.name || createdBy?.name || event.user?.name || 'Someone',
-      callerImage: callerMember?.user?.image || callerMember?.user?.profilePic || creator?.image || createdBy?.image || event.user?.image || '',
+      callerImage:
+        pickImageFromUser(callerMember?.user) ||
+        pickImageFromUser(creator) ||
+        pickImageFromUser(createdBy) ||
+        pickImageFromUser(event.user) ||
+        pickImageFromUser(firstOtherMember?.user) ||
+        participantProfiles.find((profile) => profile.id !== authUser._id)?.image ||
+        '',
       type: event.call?.custom?.callType || ((event.video ?? event.call?.video) ? 'video' : 'audio'),
       conversationId,
       callerUserId,

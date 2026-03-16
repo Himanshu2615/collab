@@ -878,27 +878,26 @@ const VideoCallModal = ({
     if (!activeCall || invitees.length === 0) return;
 
     try {
-      const existingMemberIds = new Set(
-        (activeCall.state?.members || []).map((member) => member?.user_id || member?.userId).filter(Boolean)
-      );
-
-      const membersToUpsert = invitees
-        .filter((member) => !existingMemberIds.has(member.id))
-        .map((member) => ({ user_id: member.id }));
-
-      if (membersToUpsert.length > 0) {
-        await activeCall.updateCallMembers({
-          update_members: membersToUpsert,
-        });
-      }
+      await activeCall.updateCallMembers({
+        update_members: invitees.map((member) => ({ user_id: member.id })),
+      });
 
       let usedNotificationFallback = false;
       try {
         await activeCall.ring();
       } catch (ringError) {
         console.error('Ring members again failed, trying notification fallback:', ringError);
+        usedNotificationFallback = true;
+      }
+
+      try {
         await activeCall.notify();
         usedNotificationFallback = true;
+      } catch (notifyError) {
+        if (!usedNotificationFallback) {
+          throw notifyError;
+        }
+        console.error('Notification fallback after re-invite failed:', notifyError);
       }
 
       updateCallLog(callId, {
@@ -919,10 +918,10 @@ const VideoCallModal = ({
       toast.success(
         invitees.length === 1
           ? usedNotificationFallback
-            ? `Notified ${invitees[0].name} again`
+            ? `Rang and notified ${invitees[0].name} again`
             : `Ringing ${invitees[0].name} again`
           : usedNotificationFallback
-          ? `Notified ${invitees.length} members again`
+          ? `Rang and notified ${invitees.length} members again`
           : `Ringing ${invitees.length} members again`
       );
     } catch (error) {
