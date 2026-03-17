@@ -18,6 +18,7 @@ import useDashboardSummary from "../hooks/useDashboardSummary";
 import Avatar from "../components/Avatar";
 import { useStreamContext } from "../context/StreamContext";
 import { getPresenceMeta } from "../lib/presenceUtils";
+import { motion, AnimatePresence } from "framer-motion";
 
 const getGreeting = () => {
   const h = new Date().getHours();
@@ -68,8 +69,13 @@ const isMeetingNow = (meeting) => {
   return now >= start && now <= end;
 };
 
-const DashboardCard = ({ title, icon: Icon, action, children, className = "" }) => (
-  <section className={`rounded-3xl border border-base-300 bg-base-100 shadow-sm ${className}`}>
+const DashboardCard = ({ title, icon: Icon, action, children, className = "", delay = 0 }) => (
+  <motion.section 
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.5, delay, ease: [0.23, 1, 0.32, 1] }}
+    className={`rounded-3xl border border-base-300 bg-base-100 shadow-sm hover-lift ${className}`}
+  >
     <div className="flex items-center justify-between px-5 py-4 border-b border-base-300">
       <div className="flex items-center gap-2.5">
         <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -80,7 +86,7 @@ const DashboardCard = ({ title, icon: Icon, action, children, className = "" }) 
       {action}
     </div>
     <div className="p-5">{children}</div>
-  </section>
+  </motion.section>
 );
 
 const LoaderBlock = ({ height = "h-40" }) => (
@@ -130,14 +136,26 @@ const HomePage = () => {
   return (
     <div className="min-h-screen bg-base-200/60 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="rounded-[32px] bg-base-100 px-6 py-6 sm:px-8 sm:py-7">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="rounded-[40px] bg-base-100 px-6 py-6 sm:px-8 sm:py-8 relative overflow-hidden shadow-2xl shadow-primary/5 border border-base-300/50 mesh-gradient"
+        >
+          <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-primary/70">Dashboard Overview</p>
-              <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-base-content sm:text-4xl">
-                {getGreeting()}, {firstName}
+              <motion.p 
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.2 }}
+                className="text-xs font-bold uppercase tracking-[0.3em] text-primary"
+              >
+                Dashboard Overview
+              </motion.p>
+              <h1 className="mt-2 text-4xl font-black tracking-tight text-base-content sm:text-5xl lg:text-6xl">
+                {getGreeting()}, <span className="text-primary">{firstName}</span>
               </h1>
-              <p className="mt-2 max-w-2xl text-sm text-base-content/60 sm:text-base">
+              <p className="mt-3 max-w-2xl text-sm font-medium text-base-content/60 sm:text-lg">
                 {getFocusText(todayMeetings.length)}
               </p>
             </div>
@@ -170,13 +188,18 @@ const HomePage = () => {
               </Link>
             </div>
           </div>
-        </div>
+          
+          {/* Subtle decorative elements */}
+          <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-3xl -mr-32 -mt-32 pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-48 h-48 bg-secondary/10 rounded-full blur-3xl -ml-24 -mb-24 pointer-events-none" />
+        </motion.div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
           <DashboardCard
             title="Today's Schedule"
             icon={CalendarDaysIcon}
             className="lg:col-span-8"
+            delay={0.1}
             action={
               <Link to="/schedule" className="text-xs font-bold uppercase tracking-wide text-primary transition hover:opacity-80">
                 View calendar
@@ -269,6 +292,7 @@ const HomePage = () => {
             title="Recent Files"
             icon={FileTextIcon}
             className="lg:col-span-4"
+            delay={0.2}
             action={
               <Link to="/files" className="text-xs font-bold uppercase tracking-wide text-primary transition hover:opacity-80">
                 Browse
@@ -317,6 +341,7 @@ const HomePage = () => {
             title="What's New"
             icon={MegaphoneIcon}
             className="lg:col-span-8"
+            delay={0.3}
             action={<button className="btn btn-ghost btn-xs btn-circle text-base-content/40">•••</button>}
           >
             {showSectionLoaders ? (
@@ -380,6 +405,7 @@ const HomePage = () => {
             title="Team Status"
             icon={UsersIcon}
             className="lg:col-span-4"
+            delay={0.4}
             action={
               <Link to="/friends" className="text-xs font-bold uppercase tracking-wide text-primary transition hover:opacity-80">
                 Directory

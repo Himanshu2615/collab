@@ -15,6 +15,7 @@ import {
     Check,
     CheckCheck,
 } from "lucide-react";
+import { motion } from "framer-motion";
 
 /**
  * PremiumMessage — A state-of-the-art message renderer with glassmorphism and depth.
@@ -85,7 +86,10 @@ const PremiumMessage = () => {
     const hasThread = !!message.reply_count;
 
     return (
-        <div
+        <motion.div
+            initial={{ opacity: 0, x: isFirst ? -10 : 0, y: isFirst ? 10 : 0 }}
+            animate={{ opacity: 1, x: 0, y: 0 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
             className={`group relative flex items-start gap-4 px-6 transition-all duration-300 ease-in-out
                 ${isFirst ? "pt-4 pb-1" : "py-0.5"}
                 ${isHovered ? "bg-primary/5 shadow-[inset_4px_0_0_0_rgb(var(--primary))]" : "bg-transparent"}
@@ -259,7 +263,7 @@ const PremiumMessage = () => {
                     </div>
                 </div>
             </div>
-        </div>
+        </motion.div>
     );
 };
 
