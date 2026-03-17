@@ -71,9 +71,24 @@ if (process.env.NODE_ENV === "production") {
 }
 
 // Connect to MongoDB BEFORE accepting requests
-connectDB().then(async () => {
-  await initScheduler();
-  app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-  });
-});
+const startServer = async () => {
+  try {
+    await connectDB();
+    await initScheduler();
+    
+    // Only listen in non-production/local environments. 
+    // Vercel handles invocation automatically via the exported 'app'.
+    if (process.env.NODE_ENV !== "production") {
+      app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
+      });
+    }
+  } catch (err) {
+    console.error("Failed to start server:", err);
+  }
+};
+
+startServer();
+
+// Export for Vercel
+export default app;
