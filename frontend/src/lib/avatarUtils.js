@@ -31,7 +31,7 @@ const IMAGE_PROXY_BASE = import.meta.env.MODE === "development"
  */
 export function isValidAvatarUrl(url) {
     if (!url || !url.trim()) return false;
-    if (url.startsWith("data:")) return true; // base64 upload — always valid
+    if (url.startsWith("data:") || url.startsWith("/")) return true; // base64 or absolute path — always valid
     try {
         const { protocol, hostname } = new URL(url);
         if (BLOCKED_AVATAR_HOSTS.has(hostname)) return false;
@@ -42,18 +42,9 @@ export function isValidAvatarUrl(url) {
 }
 
 export function getDisplayImageUrl(url) {
-    if (!isValidAvatarUrl(url) || url.startsWith("data:")) return url;
-
-    try {
-        const parsedUrl = new URL(url);
-        if (!CLOUDINARY_HOSTS.has(parsedUrl.hostname)) {
-            return url;
-        }
-
-        return `${IMAGE_PROXY_BASE}?url=${encodeURIComponent(parsedUrl.toString())}`;
-    } catch {
-        return url;
-    }
+    // Cloudinary images are cross-origin friendly; load them directly to avoid proxy overhead/timeouts.
+    // If you need CORS for canvas (e.g. for photo filtering), then apply proxy ONLY to non-Cloudinary hosts.
+    return url;
 }
 
 /**
