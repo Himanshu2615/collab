@@ -35,7 +35,7 @@ const SORT_OPTIONS = [
 ];
 
 const RECENT_MS   = 7 * 24 * 60 * 60 * 1000;
-const MAX_FILE_MB = 10;
+const MAX_FILE_MB = 50;
 
 /* ─── Helpers ───────────────────────────────────── */
 const catCount = (id, files) => {

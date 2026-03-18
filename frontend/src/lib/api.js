@@ -49,6 +49,32 @@ export const uploadFile = async (data) => {
   return res.data;
 };
 
+/**
+ * Modern Stream-compatible uploader. Converts a File object to Base64,
+ * uploads to our Cloudinary backend, and returns the format Stream expects.
+ */
+export const streamCustomUploadRequest = async (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const type = file.type.startsWith("image/") ? "image" : (file.type === "application/pdf" ? "document" : "other");
+        const res = await uploadFile({
+          name: file.name,
+          type,
+          fileBase64: e.target.result
+        });
+        // Stream expects a 'file' property containing the final public URL
+        resolve({ file: res.url });
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
 export const deleteFile = async (id) => {
   const res = await axiosInstance.delete(`/files/${id}`);
   return res.data;

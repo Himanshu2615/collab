@@ -3,7 +3,7 @@ import "stream-chat-react/dist/css/v2/index.css";
 import { useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
-import { getStreamToken, ensureOrgChannel } from "../lib/api";
+import { getStreamToken, ensureOrgChannel, streamCustomUploadRequest } from "../lib/api";
 import Avatar from "../components/Avatar";
 import { setUserImageCache, getUserImage } from "../lib/userImageCache";
 import { useStreamContext } from "../context/StreamContext";
@@ -306,6 +306,8 @@ const FullScreenChatPage = () => {
       <Chat client={chatClient} theme="str-chat__theme-light">
         <Channel
           channel={channel}
+          doFileUploadRequest={streamCustomUploadRequest}
+          doImageUploadRequest={streamCustomUploadRequest}
           EmptyStateIndicator={() => (
             <EmptyChannelState
               isChannel={isChannel}

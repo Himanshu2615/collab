@@ -162,7 +162,46 @@ const PremiumMessage = () => {
                     {message.text}
                 </div>
 
-                {/* ── Attachments — handled by Stream default or custom below if needed ── */}
+                {/* ── Attachments ── */}
+                {message.attachments?.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-3">
+                        {message.attachments.map((at, i) => {
+                            const isImage = at.type === "image" || (at.mime_type?.startsWith("image/"));
+                            if (isImage) {
+                                return (
+                                    <div key={i} className="relative group/img max-w-sm rounded-2xl overflow-hidden border border-base-300 shadow-sm bg-base-200/50 backdrop-blur-md transition-all hover:shadow-lg">
+                                        <img 
+                                            src={at.image_url || at.thumb_url} 
+                                            alt={at.fallback || "Image attachment"} 
+                                            className="w-full h-auto object-cover max-h-[320px] cursor-zoom-in"
+                                            onClick={() => window.open(at.image_url || at.thumb_url, "_blank")}
+                                        />
+                                        <div className="absolute inset-0 bg-black/5 group-hover/img:bg-transparent transition-colors pointer-events-none"></div>
+                                    </div>
+                                );
+                            }
+                            
+                            // File / PDF / etc.
+                            return (
+                                <div 
+                                    key={i}
+                                    onClick={() => window.open(at.asset_url || at.file_url, "_blank")}
+                                    className="flex items-center gap-3 px-4 py-3 bg-base-100/80 backdrop-blur-md border border-base-300 rounded-2xl cursor-pointer hover:bg-primary/5 hover:border-primary/20 transition-all shadow-sm group/file max-w-xs"
+                                >
+                                    <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0 group-hover/file:scale-110 transition-transform">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-bold truncate text-base-content">{at.title || "Document"}</div>
+                                        <div className="text-[10px] uppercase font-heavy tracking-tighter text-base-content/40 mt-0.5">
+                                            {at.file_size ? `${(at.file_size / 1024).toFixed(1)} KB` : (at.mime_type?.split("/")[1] || "File")}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
 
                 {/* ── Reactions ── */}
                 {hasReactions && (

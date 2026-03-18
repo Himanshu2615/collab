@@ -3,7 +3,7 @@ import "stream-chat-react/dist/css/v2/index.css";
 import { useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
-import { getStreamToken } from "../lib/api";
+import { getStreamToken, streamCustomUploadRequest } from "../lib/api";
 
 import {
   Channel,
@@ -19,6 +19,7 @@ import toast from "react-hot-toast";
 
 import ChatLoader from "../components/ChatLoader";
 import CallButton from "../components/CallButton";
+import PremiumMessage from "../components/PremiumMessage";
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 
@@ -109,12 +110,16 @@ const ChatPage = () => {
   return (
     <div className="h-[93vh]">
       <Chat client={chatClient}>
-        <Channel channel={channel}>
+        <Channel 
+          channel={channel} 
+          doFileUploadRequest={streamCustomUploadRequest}
+          doImageUploadRequest={streamCustomUploadRequest}
+        >
           <div className="w-full relative">
             <CallButton handleVideoCall={handleVideoCall} />
             <Window>
               <ChannelHeader />
-              <MessageList />
+              <MessageList Message={PremiumMessage} />
               <MessageInput focus />
             </Window>
           </div>
