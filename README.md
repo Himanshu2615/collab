@@ -338,5 +338,3 @@ Collab is configured for deployment on Render with the following setup:
 ## 📞 Support
 
 For support, please open an issue on the GitHub repository or contact the development team.
-#   c o l l a b  
- 
